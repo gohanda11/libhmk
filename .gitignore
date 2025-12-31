@@ -6,7 +6,7 @@ __pycache__/
 .serena/
 .mcp.json
 schematic/
-.gitignore
+.venv/
 
 # Metadata header file
 include/metadata.h
