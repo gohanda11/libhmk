@@ -2,6 +2,11 @@
 .vscode/
 platformio.ini
 __pycache__/
+.claude/
+.serena/
+.mcp.json
+schematic/
+.gitignore
 
 # Metadata header file
 include/metadata.h
