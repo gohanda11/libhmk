@@ -1,5 +1,14 @@
 # libhmk
 
+This repository is a fork of [peppapighs/libhmk](https://github.com/peppapighs/libhmk/tree/main).
+
+## Changes from upstream
+
+- **Chai45HE keyboard**: Added a custom 45-key Hall-effect keyboard (`keyboards/chai45he`).
+- **Tap-Hold layer switch fix**: Restructured `layout_task` to use a two-pass key processing approach. When a Tap-Hold key (e.g., LT with MO layer) and another key are pressed nearly simultaneously, the Tap-Hold is now promoted to hold before the other key's keycode is resolved. This ensures the correct layer is active for keycode lookup, matching ZMK's default behavior.
+
+## Original description
+
 This repository contains libraries for building a Hall-effect keyboard firmware.
 
 ## Table of Contents

@@ -132,9 +132,16 @@ void layout_task(void) {
   static advanced_key_event_t ak_event = {0};
   static uint32_t last_ak_tick = 0;
 
-  const uint8_t current_layer = layout_get_current_layer();
+  uint8_t current_layer = layout_get_current_layer();
   bool has_non_tap_hold_press = false;
 
+  // Bitmap to track keys whose press registration is deferred to pass 2
+  bitmap_t deferred_presses[M_DIV_CEIL(NUM_KEYS, 32)] = {0};
+
+  // Pass 1: Detect events, process tap-hold presses / releases / holds.
+  // Non-tap-hold key presses are deferred so that tap-hold promotion (and
+  // the resulting layer change) takes effect before their keycodes are
+  // resolved.
   for (uint32_t i = 0; i < NUM_KEYS; i++) {
     const key_state_t *k = &key_matrix[i];
     const bool last_key_press = bitmap_get(key_press_states, i);
@@ -163,10 +170,12 @@ void layout_task(void) {
 
     if (k->is_pressed & !last_key_press) {
       // Key press event
-      const uint8_t keycode = layout_get_keycode(current_layer, i);
       const uint8_t ak_index = advanced_key_indices[current_layer][i];
 
-      if (ak_index) {
+      if (ak_index &&
+          CURRENT_PROFILE.advanced_keys[ak_index - 1].type == AK_TYPE_TAP_HOLD) {
+        // Tap-hold key: process press immediately (enter TAP stage)
+        const uint8_t keycode = layout_get_keycode(current_layer, i);
         active_advanced_keys[i] = ak_index;
         ak_event = (advanced_key_event_t){
             .type = AK_EVENT_TYPE_PRESS,
@@ -175,13 +184,10 @@ void layout_task(void) {
             .ak_index = ak_index - 1,
         };
         advanced_key_process(&ak_event);
-        has_non_tap_hold_press |=
-            (CURRENT_PROFILE.advanced_keys[ak_index - 1].type !=
-             AK_TYPE_TAP_HOLD);
       } else {
-        active_keycodes[i] = keycode;
-        layout_register(i, keycode);
-        has_non_tap_hold_press |= (keycode != KC_NO);
+        // Non-tap-hold key: defer registration to pass 2
+        bitmap_set(deferred_presses, i, 1);
+        has_non_tap_hold_press = true;
       }
     } else if (!k->is_pressed & last_key_press) {
       // Key release event
@@ -221,12 +227,37 @@ void layout_task(void) {
     bitmap_set(key_press_states, i, k->is_pressed);
   }
 
+  // Tick advanced keys between passes. This promotes tap-hold keys with
+  // hold_on_other_key_press to HOLD (potentially activating MO layers)
+  // before deferred key presses resolve their keycodes.
   if (has_non_tap_hold_press || timer_elapsed(last_ak_tick) > 0) {
-    // We only need to tick the advanced keys every 1ms, or when there is a
-    // non-Tap-Hold key press event since these are the only cases that
-    // the advanced keys might perform an action.
     advanced_key_tick(has_non_tap_hold_press);
     last_ak_tick = timer_read();
+  }
+
+  // Pass 2: Register deferred key presses with the (potentially updated) layer
+  current_layer = layout_get_current_layer();
+
+  for (uint32_t i = 0; i < NUM_KEYS; i++) {
+    if (!bitmap_get(deferred_presses, i))
+      continue;
+
+    const uint8_t keycode = layout_get_keycode(current_layer, i);
+    const uint8_t ak_index = advanced_key_indices[current_layer][i];
+
+    if (ak_index) {
+      active_advanced_keys[i] = ak_index;
+      ak_event = (advanced_key_event_t){
+          .type = AK_EVENT_TYPE_PRESS,
+          .key = i,
+          .keycode = keycode,
+          .ak_index = ak_index - 1,
+      };
+      advanced_key_process(&ak_event);
+    } else {
+      active_keycodes[i] = keycode;
+      layout_register(i, keycode);
+    }
   }
 
   if (should_send_reports) {
