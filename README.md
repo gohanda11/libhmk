@@ -62,7 +62,7 @@ This repository contains libraries for building a Hall-effect keyboard firmware.
 
 ## Development
 
-The development branch is `dev`, which contains the latest features and bug fixes. The corresponding `dev` branch of [hmkconf](https://github.com/peppapighs/hmkconf/tree/dev) deployed at [https://hmkdev.prasertsuk.com](https://hmkdev.prasertsuk.com) is required to configure the `dev` branch of the firmware. To contribute, please create a pull request against the `dev` branch.
+The development branch is `dev`, which contains the latest features and bug fixes. The corresponding `dev` branch of [hmkconf](https://github.com/peppapighs/hmkconf/tree/dev) deployed at [https://dev.hmkconf.com](https://dev.hmkconf.com) is required to configure the `dev` branch of the firmware. To contribute, please create a pull request against the `dev` branch.
 
 ### Developing a New Keyboard
 
@@ -79,10 +79,11 @@ You can use an existing keyboard implementation as a reference. If your keyboard
 
 Hardware drivers follow this directory structure:
 
-- [`hardware/`](hardware/): Contains hardware-specific header files. Each subdirectory should also contain an `info.json` file that describes the PlatformIO configuration, TinyUSB configuration, and additional metadata. Refer to [`scripts/schema/driver.schema.json`](scripts/schema/driver.schema.json) for the schema.
+- [`hardware/`](hardware/): Contains hardware-specific header files. Each subdirectory may contain `config.h` and `board_def.h` for additional configuration, and board-specific definitions, respectively.
 - [`include/hardware/`](include/hardware/): Contains hardware driver interface headers that declare functions to be implemented
 - [`src/hardware/`](src/hardware/): Contains hardware driver implementations of the functions declared in the header files
 - [`linker/`](linker/): Contains linker scripts for supported microcontrollers
+- [`scripts/drivers.py`](scripts/drivers.py): Contains the driver configuration for each supported microcontroller. Each driver must implement the `Driver` class.
 
 You can refer to existing hardware drivers as examples when implementing support for new hardware.
 

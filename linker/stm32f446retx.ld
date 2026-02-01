@@ -44,10 +44,12 @@ _Min_Heap_Size = 0x200; /* required amount of heap */
 _Min_Stack_Size = 0x400; /* required amount of stack */
 
 /* Memories definition */
+BASE_ADDR = 0x8000000;
 MEMORY
 {
-  RAM    (xrw)    : ORIGIN = 0x20000000,   LENGTH = 128K - 4 /* Reserve 4 bytes for bootloader */
-  FLASH    (rx)    : ORIGIN = 0x8000000,   LENGTH = 512K
+  FLASH    (rx)   : ORIGIN = BASE_ADDR, LENGTH = WL_BASE_ADDRESS
+  FLASH_WL (r)    : ORIGIN = BASE_ADDR + WL_BASE_ADDRESS, LENGTH = FLASH_SIZE - WL_BASE_ADDRESS
+  RAM    (xrw)    : ORIGIN = 0x20000000, LENGTH = 128K - 4 /* Reserve 4 bytes for bootloader */
 }
 
 /* Sections */

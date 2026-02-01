@@ -19,7 +19,7 @@
 // Firmware Version
 //--------------------------------------------------------------------+
 
-#define FIRMWARE_VERSION 0x0104
+#define FIRMWARE_VERSION 0x0106
 
 //--------------------------------------------------------------------+
 // Common Headers
@@ -38,7 +38,12 @@
 #endif
 #endif
 
+#if defined(__has_include)
+#if __has_include("board_def.h")
+// Include board-specific definitions if available
 #include "board_def.h"
+#endif
+#endif
 
 //--------------------------------------------------------------------+
 // Common Macros
