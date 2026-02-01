@@ -1,12 +1,12 @@
 .pio
 .vscode/
-platformio.ini
-__pycache__/
 .claude/
 .serena/
-.mcp.json
-schematic/
 .venv/
+schematic/
+.mcp.json
+platformio.ini
+__pycache__/
 
 # Metadata header file
 include/metadata.h
