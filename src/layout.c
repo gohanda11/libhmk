@@ -235,13 +235,14 @@ void layout_task(void) {
     last_ak_tick = timer_read();
   }
 
-  // Pass 2: Register deferred key presses with the (potentially updated) layer
-  current_layer = layout_get_current_layer();
-
+  // Pass 2: Register deferred key presses with the (potentially updated) layer.
+  // Re-read current_layer per key so that a deferred MO/layer keycode registered
+  // earlier in this pass is visible to later deferred keys in the same scan.
   for (uint32_t i = 0; i < NUM_KEYS; i++) {
     if (!bitmap_get(deferred_presses, i))
       continue;
 
+    current_layer = layout_get_current_layer();
     const uint8_t keycode = layout_get_keycode(current_layer, i);
     const uint8_t ak_index = advanced_key_indices[current_layer][i];
 
