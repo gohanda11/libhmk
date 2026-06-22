@@ -80,35 +80,87 @@ if kb_json.analog.invert_adc:
 if kb_json.analog.delay is not None:
     build_flags.define("ADC_SAMPLE_DELAY", kb_json.analog.delay)
 
-# Raw ADC Input Configuration
-if kb_json.analog.raw is not None:
-    raw = kb_json.analog.raw
 
-    build_flags.define("ADC_NUM_RAW_INPUTS", len(raw.input))
-    build_flags.define(
-        "ADC_RAW_INPUT_CHANNELS",
-        utils.to_c_array(driver.metadata.adc.to_adc_inputs(raw.input)),
+def define_analog_macros(analog, suffix=""):
+    # Raw ADC Input Configuration
+    if analog.raw is not None:
+        raw = analog.raw
+        build_flags.define(f"ADC_NUM_RAW_INPUTS{suffix}", len(raw.input))
+        build_flags.define(
+            f"ADC_RAW_INPUT_CHANNELS{suffix}",
+            utils.to_c_array(driver.metadata.adc.to_adc_inputs(raw.input)),
+        )
+        build_flags.define(
+            f"ADC_RAW_INPUT_VECTOR{suffix}", utils.to_c_array(raw.vector)
+        )
+
+    # Analog Multiplexer ADC Input Configuration
+    if analog.mux is not None:
+        mux = analog.mux
+        build_flags.define(f"ADC_NUM_MUX_INPUTS{suffix}", len(mux.input))
+        build_flags.define(
+            f"ADC_MUX_INPUT_CHANNELS{suffix}",
+            utils.to_c_array(driver.metadata.adc.to_adc_inputs(mux.input)),
+        )
+        build_flags.define(f"ADC_NUM_MUX_SELECT_PINS{suffix}", len(mux.select))
+
+        ports, pin_nums = driver.metadata.adc.to_gpio_array(mux.select)
+        build_flags.define(f"ADC_MUX_SELECT_PORTS{suffix}", utils.to_c_array(ports))
+        build_flags.define(f"ADC_MUX_SELECT_PINS{suffix}", utils.to_c_array(pin_nums))
+
+        build_flags.define(
+            f"ADC_MUX_INPUT_MATRIX{suffix}",
+            utils.to_c_array(list(map(list, zip(*mux.matrix)))),
+        )
+
+
+if kb_json.split is not None and kb_json.split.enabled:
+    split = kb_json.split
+    analog_left = split.analog_left if split.analog_left is not None else kb_json.analog
+    analog_right = (
+        split.analog_right if split.analog_right is not None else kb_json.analog
     )
-    build_flags.define("ADC_RAW_INPUT_VECTOR", utils.to_c_array(raw.vector))
 
-# Analog Multiplexer ADC Input Configuration
-if kb_json.analog.mux is not None:
-    mux = kb_json.analog.mux
+    # Both halves must use the same analog configuration structure (raw and/or mux)
+    # so that the driver can use a common local key mapping.
+    if (analog_left.raw is not None) != (analog_right.raw is not None):
+        raise ValueError(
+            "Both split halves must either have raw analog inputs or neither"
+        )
+    if (analog_left.mux is not None) != (analog_right.mux is not None):
+        raise ValueError(
+            "Both split halves must either have mux analog inputs or neither"
+        )
 
-    build_flags.define("ADC_NUM_MUX_INPUTS", len(mux.input))
-    build_flags.define(
-        "ADC_MUX_INPUT_CHANNELS",
-        utils.to_c_array(driver.metadata.adc.to_adc_inputs(mux.input)),
-    )
-    build_flags.define("ADC_NUM_MUX_SELECT_PINS", len(mux.select))
+    if analog_left.raw is not None:
+        if len(analog_left.raw.input) != len(analog_right.raw.input):
+            raise ValueError(
+                "Left and right raw analog input counts must match"
+            )
+        if len(analog_left.raw.vector) != len(analog_right.raw.vector):
+            raise ValueError(
+                "Left and right raw analog vector lengths must match"
+            )
 
-    ports, pin_nums = driver.metadata.adc.to_gpio_array(mux.select)
-    build_flags.define("ADC_MUX_SELECT_PORTS", utils.to_c_array(ports))
-    build_flags.define("ADC_MUX_SELECT_PINS", utils.to_c_array(pin_nums))
+    if analog_left.mux is not None:
+        if len(analog_left.mux.input) != len(analog_right.mux.input):
+            raise ValueError(
+                "Left and right mux analog input counts must match"
+            )
+        if len(analog_left.mux.select) != len(analog_right.mux.select):
+            raise ValueError(
+                "Left and right mux select pin counts must match"
+            )
 
-    build_flags.define(
-        "ADC_MUX_INPUT_MATRIX", utils.to_c_array(list(map(list, zip(*mux.matrix))))
-    )
+    # For split keyboards, the unsuffixed macros describe the left half (used for
+    # buffer sizing and common counts), and the _RIGHT macros describe the right
+    # half. The driver selects between them at runtime based on handedness.
+    define_analog_macros(analog_left)
+    define_analog_macros(analog_left, "_LEFT")
+    define_analog_macros(analog_right, "_RIGHT")
+else:
+    # Generate the base analog macros used by non-split keyboards.
+    define_analog_macros(kb_json.analog)
 
 # Calibration Configuration
 build_flags.define(
@@ -147,6 +199,77 @@ if kb_json.actuation is not None:
     actuation = kb_json.actuation
     if actuation.actuation_point is not None:
         build_flags.define("ACTUATION_POINT", actuation.actuation_point)
+
+# Split Keyboard Configuration
+if kb_json.split is not None and kb_json.split.enabled:
+    split = kb_json.split
+
+    build_flags.define("SPLIT_KEYBOARD")
+    build_flags.define("SPLIT_UART_INSTANCE", split.uart_instance)
+    build_flags.define("SPLIT_UART_BAUD_RATE", split.baud_rate)
+    build_flags.define("SPLIT_NUM_KEYS_LEFT", split.left_keys)
+    build_flags.define("SPLIT_NUM_KEYS_RIGHT", split.right_keys)
+    build_flags.define(
+        "DEFAULT_SPLIT_HANDEDNESS",
+        0 if split.eeprom_default_handedness == "left" else 1,
+    )
+
+    left_offset = split.left_key_offset
+    right_offset = split.right_key_offset
+
+    if left_offset + split.left_keys > kb_json.keyboard.num_keys:
+        raise ValueError(
+            "Split left half key range exceeds keyboard.num_keys"
+        )
+    if right_offset + split.right_keys > kb_json.keyboard.num_keys:
+        raise ValueError(
+            "Split right half key range exceeds keyboard.num_keys"
+        )
+    if left_offset < right_offset + split.right_keys and right_offset < left_offset + split.left_keys:
+        raise ValueError("Split left and right key ranges overlap")
+
+    build_flags.define("SPLIT_KEY_OFFSET_LEFT", left_offset)
+    build_flags.define("SPLIT_KEY_OFFSET_RIGHT", right_offset)
+
+    local_keys_max = max(split.left_keys, split.right_keys)
+    build_flags.define("SPLIT_NUM_KEYS_LOCAL_MAX", local_keys_max)
+
+    if split.uart_tx_pin is None:
+        raise ValueError("uart_tx_pin is required when split is enabled")
+
+    # UART TX pin
+    if split.uart_tx_pin is not None:
+        tx_port, tx_pin = utils.pin_name_to_port_pin(split.uart_tx_pin)
+        build_flags.define("SPLIT_UART_TX_PORT", tx_port)
+        build_flags.define("SPLIT_UART_TX_PIN", tx_pin)
+        build_flags.define("SPLIT_UART_TX_MUX", split.uart_tx_mux)
+
+    # UART RX pin (full-duplex)
+    if split.uart_rx_pin is not None:
+        rx_port, rx_pin = utils.pin_name_to_port_pin(split.uart_rx_pin)
+        build_flags.define("SPLIT_UART_RX_PORT", rx_port)
+        build_flags.define("SPLIT_UART_RX_PIN", rx_pin)
+        build_flags.define("SPLIT_UART_RX_MUX", split.uart_rx_mux)
+    else:
+        # Default to half-duplex if no RX pin is specified
+        build_flags.define("SPLIT_UART_HALF_DUPLEX")
+
+    # Handedness detection
+    if split.handedness == "pin":
+        if split.handedness_pin is None:
+            raise ValueError("handedness_pin is required when handedness is 'pin'")
+        h_port, h_pin = utils.pin_name_to_port_pin(split.handedness_pin)
+        build_flags.define("SPLIT_HANDEDNESS_PIN")
+        build_flags.define("SPLIT_HANDEDNESS_PIN_PORT", h_port)
+        build_flags.define("SPLIT_HANDEDNESS_PIN_PIN", h_pin)
+        if split.handedness_pin_low_is_left:
+            build_flags.define("SPLIT_HANDEDNESS_PIN_LOW_IS_LEFT")
+    elif split.handedness == "eeprom":
+        build_flags.define("SPLIT_HANDEDNESS_EEPROM")
+    elif split.handedness == "left":
+        build_flags.define("SPLIT_HANDEDNESS_LEFT")
+    elif split.handedness == "right":
+        build_flags.define("SPLIT_HANDEDNESS_RIGHT")
 
 # Add source build flags
 env.Append(BUILD_FLAGS=build_flags.get_flags())

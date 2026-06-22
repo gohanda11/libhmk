@@ -20,6 +20,7 @@
 #include "lib/bitmap.h"
 #include "lib/usqrt.h"
 #include "matrix.h"
+#include "split.h"
 #include "tusb.h"
 #include "usb_descriptors.h"
 
@@ -150,6 +151,12 @@ void xinput_process(uint8_t key) {
 }
 
 void xinput_task(void) {
+#if defined(SPLIT_KEYBOARD)
+  // Only the master half sends XInput reports to the host
+  if (!split_is_master())
+    return;
+#endif
+
   static xinput_report_t last_report = {.report_size = sizeof(xinput_report_t)};
 
   bool is_key_end_deadzone = false;

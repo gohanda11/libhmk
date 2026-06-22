@@ -20,6 +20,8 @@
 #include "layout.h"
 #include "matrix.h"
 #include "metadata.h"
+#include "split.h"
+#include "split_protocol.h"
 #include "tusb.h"
 
 // Helper macro to verify command parameters
@@ -59,6 +61,10 @@ void command_process(const uint8_t *buf) {
     break;
   }
   case COMMAND_RECALIBRATE: {
+#if defined(SPLIT_KEYBOARD)
+    // Propagate recalibrate command to the slave half
+    split_send_control_command(SPLIT_CONTROL_RECALIBRATE);
+#endif
     matrix_recalibrate(true);
     break;
   }
@@ -160,6 +166,16 @@ void command_process(const uint8_t *buf) {
             key_matrix[i].adc_bottom_out_value - key_matrix[i].adc_rest_value;
     }
     success = EECONFIG_WRITE(bottom_out_threshold, bottom_out_threshold);
+    break;
+  }
+  case COMMAND_SET_SPLIT_HANDEDNESS: {
+#if defined(SPLIT_KEYBOARD)
+    const command_in_split_handedness_t *p = &in->split_handedness;
+    COMMAND_VERIFY(p->handedness <= 1);
+    success = EECONFIG_WRITE(split_handedness, &p->handedness);
+#else
+    success = false;
+#endif
     break;
   }
     //--------------------------------------------------------------------+

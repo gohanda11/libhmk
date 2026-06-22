@@ -12,6 +12,7 @@
 # this program. If not, see <https://www.gnu.org/licenses/>.
 
 from enum import Enum
+from typing import Literal
 from pydantic import BaseModel, Field, NonNegativeInt, PositiveFloat, PositiveInt
 
 
@@ -109,6 +110,50 @@ class KeyboardLayout(BaseModel):
     keymap: list[list[KeyboardLayoutKey]]
 
 
+# Per-half analog configuration for split keyboards
+class KeyboardSplitAnalog(BaseModel):
+    raw: KeyboardAnalogRaw | None = None
+    mux: KeyboardAnalogMux | None = None
+
+
+# Split Keyboard Configuration
+class KeyboardSplit(BaseModel):
+    # Enable split keyboard support
+    enabled: bool = False
+    # UART peripheral instance (e.g., 1 for USART1, 2 for USART2)
+    uart_instance: int = Field(default=1, ge=1, le=8)
+    # UART TX pin (half-duplex) or TX pin (full-duplex)
+    uart_tx_pin: str | None = None
+    # GPIO alternate function mux for TX pin (0-15)
+    uart_tx_mux: int = Field(default=7, ge=0, le=15)
+    # UART RX pin for full-duplex operation
+    uart_rx_pin: str | None = None
+    # GPIO alternate function mux for RX pin (0-15)
+    uart_rx_mux: int = Field(default=7, ge=0, le=15)
+    # UART baud rate
+    baud_rate: int = Field(default=1000000, ge=9600, le=10000000)
+    # Handedness detection method
+    handedness: Literal["pin", "eeprom", "left", "right"] = "left"
+    # GPIO pin for handedness detection (high = left, low = right unless inverted)
+    handedness_pin: str | None = None
+    # Number of keys connected to the left half
+    left_keys: int = Field(default=1, ge=1, le=256)
+    # Number of keys connected to the right half
+    right_keys: int = Field(default=1, ge=1, le=256)
+    # Key index offset of the left half in the global keymap
+    left_key_offset: int = Field(default=0, ge=0, le=255)
+    # Key index offset of the right half in the global keymap
+    right_key_offset: int = Field(default=0, ge=0, le=255)
+    # Invert handedness pin logic (low = left, high = right)
+    handedness_pin_low_is_left: bool = False
+    # Default handedness when using EEPROM detection (left/right)
+    eeprom_default_handedness: Literal["left", "right"] = "left"
+    # Analog configuration for the left half (falls back to global analog if omitted)
+    analog_left: KeyboardSplitAnalog | None = None
+    # Analog configuration for the right half (falls back to global analog if omitted)
+    analog_right: KeyboardSplitAnalog | None = None
+
+
 # Actuation Configuration
 class KeyboardActuation(BaseModel):
     # Default actuation point
@@ -126,6 +171,7 @@ class Keyboard(BaseModel):
     analog: KeyboardAnalog
     calibration: KeyboardCalibration
     wear_leveling: KeyboardWearLeveling | None = None
+    split: KeyboardSplit | None = None
     layout: KeyboardLayout
     # Default keymap
     keymap: list[list[str]] | None = None

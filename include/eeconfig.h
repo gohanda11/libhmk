@@ -73,7 +73,7 @@ typedef struct __attribute__((packed)) {
 // Persistent configuration version. The size of the configuration must be
 // non-decreasing, so that the migration can assume that the new version is at
 // least as large as the previous version.
-#define EECONFIG_VERSION 0x0104
+#define EECONFIG_VERSION 0x0105
 
 // Keyboard configuration
 // Whenever there is a change in the configuration, `EECONFIG_VERSION` must be
@@ -97,6 +97,8 @@ typedef struct __attribute__((packed)) {
   uint8_t current_profile;
   // Last non-default profile index, used for profile swapping
   uint8_t last_non_default_profile;
+  // Split keyboard handedness: 0 = left, 1 = right
+  uint8_t split_handedness;
   // End of global configurations
 
   // Profiles
@@ -153,6 +155,11 @@ extern const eeconfig_t *eeconfig;
 #if !defined(DEFAULT_TICK_RATE)
 // Default tick rate
 #define DEFAULT_TICK_RATE 30
+#endif
+
+#if !defined(DEFAULT_SPLIT_HANDEDNESS)
+// Default split keyboard handedness (0 = left, 1 = right)
+#define DEFAULT_SPLIT_HANDEDNESS 0
 #endif
 
 //--------------------------------------------------------------------+

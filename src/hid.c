@@ -18,6 +18,7 @@
 #include "commands.h"
 #include "keycodes.h"
 #include "matrix.h"
+#include "split.h"
 #include "tusb.h"
 #include "usb_descriptors.h"
 
@@ -197,6 +198,12 @@ void hid_keycode_remove(uint8_t keycode) {
 
 void hid_send_reports(void) {
 #if !defined(HID_DISABLED)
+#if defined(SPLIT_KEYBOARD)
+  // Only the master half sends HID reports to the host
+  if (!split_is_master())
+    return;
+#endif
+
   if (tud_suspended())
     // Wake up the host if it's suspended
     tud_remote_wakeup();

@@ -14,6 +14,7 @@
  */
 
 #include "hardware/hardware.h"
+#include "split.h"
 
 #include "at32f402_405.h"
 
@@ -36,6 +37,78 @@ static const uint16_t channel_pins[] = {
 
 _Static_assert(M_ARRAY_SIZE(channel_pins) == ADC_NUM_CHANNELS,
                "Invalid number of ADC channels");
+
+//--------------------------------------------------------------------+
+// Per-half analog configuration tables
+//--------------------------------------------------------------------+
+
+#if defined(SPLIT_KEYBOARD)
+
+#if ADC_NUM_MUX_INPUTS > 0
+static const uint8_t mux_input_channels_left[] = ADC_MUX_INPUT_CHANNELS_LEFT;
+static const uint8_t mux_input_channels_right[] = ADC_MUX_INPUT_CHANNELS_RIGHT;
+
+_Static_assert(M_ARRAY_SIZE(mux_input_channels_left) == ADC_NUM_MUX_INPUTS,
+               "Invalid number of left ADC multiplexer inputs");
+_Static_assert(M_ARRAY_SIZE(mux_input_channels_right) == ADC_NUM_MUX_INPUTS,
+               "Invalid number of right ADC multiplexer inputs");
+
+static gpio_type *mux_select_ports_left[] = ADC_MUX_SELECT_PORTS_LEFT;
+static gpio_type *mux_select_ports_right[] = ADC_MUX_SELECT_PORTS_RIGHT;
+
+_Static_assert(M_ARRAY_SIZE(mux_select_ports_left) == ADC_NUM_MUX_SELECT_PINS,
+               "Invalid number of left multiplexer select pins");
+_Static_assert(M_ARRAY_SIZE(mux_select_ports_right) == ADC_NUM_MUX_SELECT_PINS,
+               "Invalid number of right multiplexer select pins");
+
+static const uint16_t mux_select_pins_left[] = ADC_MUX_SELECT_PINS_LEFT;
+static const uint16_t mux_select_pins_right[] = ADC_MUX_SELECT_PINS_RIGHT;
+
+_Static_assert(M_ARRAY_SIZE(mux_select_pins_left) == ADC_NUM_MUX_SELECT_PINS,
+               "Invalid number of left multiplexer select pins");
+_Static_assert(M_ARRAY_SIZE(mux_select_pins_right) == ADC_NUM_MUX_SELECT_PINS,
+               "Invalid number of right multiplexer select pins");
+
+static const uint16_t mux_input_matrix_left[][ADC_NUM_MUX_INPUTS] =
+    ADC_MUX_INPUT_MATRIX_LEFT;
+static const uint16_t mux_input_matrix_right[][ADC_NUM_MUX_INPUTS] =
+    ADC_MUX_INPUT_MATRIX_RIGHT;
+
+_Static_assert(M_ARRAY_SIZE(mux_input_matrix_left) ==
+                   (1 << ADC_NUM_MUX_SELECT_PINS),
+               "Invalid number of left multiplexer select pins");
+_Static_assert(M_ARRAY_SIZE(mux_input_matrix_right) ==
+                   (1 << ADC_NUM_MUX_SELECT_PINS),
+               "Invalid number of right multiplexer select pins");
+
+static const uint8_t *mux_input_channels;
+static gpio_type **mux_select_ports;
+static const uint16_t *mux_select_pins;
+static const uint16_t (*mux_input_matrix)[ADC_NUM_MUX_INPUTS];
+#endif
+
+#if ADC_NUM_RAW_INPUTS > 0
+static const uint8_t raw_input_channels_left[] = ADC_RAW_INPUT_CHANNELS_LEFT;
+static const uint8_t raw_input_channels_right[] = ADC_RAW_INPUT_CHANNELS_RIGHT;
+
+_Static_assert(M_ARRAY_SIZE(raw_input_channels_left) == ADC_NUM_RAW_INPUTS,
+               "Invalid number of left ADC raw inputs");
+_Static_assert(M_ARRAY_SIZE(raw_input_channels_right) == ADC_NUM_RAW_INPUTS,
+               "Invalid number of right ADC raw inputs");
+
+static const uint16_t raw_input_vector_left[] = ADC_RAW_INPUT_VECTOR_LEFT;
+static const uint16_t raw_input_vector_right[] = ADC_RAW_INPUT_VECTOR_RIGHT;
+
+_Static_assert(M_ARRAY_SIZE(raw_input_vector_left) == ADC_NUM_RAW_INPUTS,
+               "Invalid number of left ADC raw inputs");
+_Static_assert(M_ARRAY_SIZE(raw_input_vector_right) == ADC_NUM_RAW_INPUTS,
+               "Invalid number of right ADC raw inputs");
+
+static const uint8_t *raw_input_channels;
+static const uint16_t *raw_input_vector;
+#endif
+
+#else // defined(SPLIT_KEYBOARD)
 
 #if ADC_NUM_MUX_INPUTS > 0
 // ADC channels connected to each multiplexer input
@@ -81,6 +154,8 @@ _Static_assert(M_ARRAY_SIZE(raw_input_vector) == ADC_NUM_RAW_INPUTS,
                "Invalid number of ADC raw inputs");
 #endif
 
+#endif // defined(SPLIT_KEYBOARD)
+
 static adc_base_config_type adc_base_struct;
 static dma_init_type dma_init_struct;
 static gpio_init_type gpio_init_struct;
@@ -94,6 +169,27 @@ __attribute__((aligned(8))) static volatile uint16_t
 static volatile uint16_t adc_values[NUM_KEYS];
 
 void analog_init(void) {
+#if defined(SPLIT_KEYBOARD)
+  // Select the analog configuration tables for this half before initializing
+  // the ADC peripheral.
+#if ADC_NUM_MUX_INPUTS > 0
+  mux_input_channels =
+      split_is_left() ? mux_input_channels_left : mux_input_channels_right;
+  mux_select_ports =
+      split_is_left() ? mux_select_ports_left : mux_select_ports_right;
+  mux_select_pins =
+      split_is_left() ? mux_select_pins_left : mux_select_pins_right;
+  mux_input_matrix =
+      split_is_left() ? mux_input_matrix_left : mux_input_matrix_right;
+#endif
+#if ADC_NUM_RAW_INPUTS > 0
+  raw_input_channels =
+      split_is_left() ? raw_input_channels_left : raw_input_channels_right;
+  raw_input_vector =
+      split_is_left() ? raw_input_vector_left : raw_input_vector_right;
+#endif
+#endif
+
   // Enable peripheral clocks
   crm_periph_clock_enable(CRM_ADC1_PERIPH_CLOCK, TRUE);
   crm_periph_clock_enable(CRM_DMA1_PERIPH_CLOCK, TRUE);
@@ -239,7 +335,7 @@ void DMA1_Channel1_IRQHandler(void) {
     for (uint32_t i = 0; i < ADC_NUM_MUX_INPUTS; i++) {
       const uint16_t key = mux_input_matrix[current_mux_channel][i];
       if (key)
-        adc_values[key - 1] = adc_buffer[i];
+        adc_values[split_get_key_offset() + key - 1] = adc_buffer[i];
     }
 #endif
 
@@ -247,7 +343,8 @@ void DMA1_Channel1_IRQHandler(void) {
     for (uint32_t i = 0; i < ADC_NUM_RAW_INPUTS; i++) {
       const uint16_t key = raw_input_vector[i];
       if (key)
-        adc_values[key - 1] = adc_buffer[ADC_NUM_MUX_INPUTS + i];
+        adc_values[split_get_key_offset() + key - 1] =
+            adc_buffer[ADC_NUM_MUX_INPUTS + i];
     }
 #endif
 

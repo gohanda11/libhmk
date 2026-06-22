@@ -261,3 +261,67 @@ void tud_suspend_cb(bool remote_wakeup_en) {
 }
 
 void tud_resume_cb(void) { usb_open_phy_clk(otg_global); }
+
+//--------------------------------------------------------------------+
+// GPIO API
+//--------------------------------------------------------------------+
+
+static gpio_type *const gpio_port_map[] = {
+    GPIOA, GPIOB, GPIOC, GPIOD, NULL, GPIOF, NULL, NULL,
+};
+
+static void gpio_clock_enable(uint32_t port) {
+  switch (port) {
+  case 0:
+    crm_periph_clock_enable(CRM_GPIOA_PERIPH_CLOCK, TRUE);
+    break;
+  case 1:
+    crm_periph_clock_enable(CRM_GPIOB_PERIPH_CLOCK, TRUE);
+    break;
+  case 2:
+    crm_periph_clock_enable(CRM_GPIOC_PERIPH_CLOCK, TRUE);
+    break;
+  case 3:
+    crm_periph_clock_enable(CRM_GPIOD_PERIPH_CLOCK, TRUE);
+    break;
+  case 5:
+    crm_periph_clock_enable(CRM_GPIOF_PERIPH_CLOCK, TRUE);
+    break;
+  default:
+    break;
+  }
+}
+
+static uint16_t gpio_pin_mask(uint32_t pin) { return (uint16_t)(1U << pin); }
+
+static void gpio_init_pin(uint32_t port, uint32_t pin, gpio_mode_type mode,
+                          gpio_pull_type pull) {
+  if (port >= M_ARRAY_SIZE(gpio_port_map) || gpio_port_map[port] == NULL)
+    return;
+
+  gpio_clock_enable(port);
+
+  gpio_init_type gpio_init_struct;
+  gpio_default_para_init(&gpio_init_struct);
+  gpio_init_struct.gpio_pins = gpio_pin_mask(pin);
+  gpio_init_struct.gpio_mode = mode;
+  gpio_init_struct.gpio_pull = pull;
+  gpio_init_struct.gpio_out_type = GPIO_OUTPUT_PUSH_PULL;
+  gpio_init_struct.gpio_drive_strength = GPIO_DRIVE_STRENGTH_STRONGER;
+  gpio_init(gpio_port_map[port], &gpio_init_struct);
+}
+
+void gpio_set_input(uint32_t port, uint32_t pin) {
+  gpio_init_pin(port, pin, GPIO_MODE_INPUT, GPIO_PULL_NONE);
+}
+
+void gpio_set_input_pullup(uint32_t port, uint32_t pin) {
+  gpio_init_pin(port, pin, GPIO_MODE_INPUT, GPIO_PULL_UP);
+}
+
+bool gpio_read(uint32_t port, uint32_t pin) {
+  if (port >= M_ARRAY_SIZE(gpio_port_map) || gpio_port_map[port] == NULL)
+    return false;
+  return gpio_input_data_bit_read(gpio_port_map[port], gpio_pin_mask(pin)) !=
+         RESET;
+}

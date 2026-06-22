@@ -200,3 +200,74 @@ void SysTick_Handler(void) { HAL_IncTick(); }
 void OTG_FS_IRQHandler(void) { tud_int_handler(0); }
 
 void OTG_HS_IRQHandler(void) { tud_int_handler(1); }
+
+//--------------------------------------------------------------------+
+// GPIO API
+//--------------------------------------------------------------------+
+
+static GPIO_TypeDef *const gpio_port_map[] = {
+    GPIOA, GPIOB, GPIOC, GPIOD, GPIOE, GPIOF, GPIOG, GPIOH,
+};
+
+static void gpio_clock_enable(uint32_t port) {
+  switch (port) {
+  case 0:
+    __HAL_RCC_GPIOA_CLK_ENABLE();
+    break;
+  case 1:
+    __HAL_RCC_GPIOB_CLK_ENABLE();
+    break;
+  case 2:
+    __HAL_RCC_GPIOC_CLK_ENABLE();
+    break;
+  case 3:
+    __HAL_RCC_GPIOD_CLK_ENABLE();
+    break;
+  case 4:
+    __HAL_RCC_GPIOE_CLK_ENABLE();
+    break;
+  case 5:
+    __HAL_RCC_GPIOF_CLK_ENABLE();
+    break;
+  case 6:
+    __HAL_RCC_GPIOG_CLK_ENABLE();
+    break;
+  case 7:
+    __HAL_RCC_GPIOH_CLK_ENABLE();
+    break;
+  default:
+    break;
+  }
+}
+
+static uint16_t gpio_pin_mask(uint32_t pin) { return (uint16_t)(1U << pin); }
+
+static void gpio_init_pin(uint32_t port, uint32_t pin, uint32_t mode,
+                          uint32_t pull) {
+  if (port >= M_ARRAY_SIZE(gpio_port_map))
+    return;
+
+  gpio_clock_enable(port);
+
+  GPIO_InitTypeDef gpio_init = {0};
+  gpio_init.Pin = gpio_pin_mask(pin);
+  gpio_init.Mode = mode;
+  gpio_init.Pull = pull;
+  gpio_init.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(gpio_port_map[port], &gpio_init);
+}
+
+void gpio_set_input(uint32_t port, uint32_t pin) {
+  gpio_init_pin(port, pin, GPIO_MODE_INPUT, GPIO_NOPULL);
+}
+
+void gpio_set_input_pullup(uint32_t port, uint32_t pin) {
+  gpio_init_pin(port, pin, GPIO_MODE_INPUT, GPIO_PULLUP);
+}
+
+bool gpio_read(uint32_t port, uint32_t pin) {
+  if (port >= M_ARRAY_SIZE(gpio_port_map))
+    return false;
+  return HAL_GPIO_ReadPin(gpio_port_map[port], gpio_pin_mask(pin)) !=
+         GPIO_PIN_RESET;
+}

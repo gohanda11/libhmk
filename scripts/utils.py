@@ -79,6 +79,17 @@ def to_slice_def(name: str, arr: list | bytes):
     return f"#define {name.upper()} {', '.join(str(x) for x in arr)}"
 
 
+# Convert a GPIO pin name (e.g., "B6") to a zero-based port index and pin number
+def pin_name_to_port_pin(pin_name: str) -> tuple[int, int]:
+    if len(pin_name) < 2:
+        raise ValueError(f"Invalid pin name: {pin_name}")
+    port = ord(pin_name[0].upper()) - ord("A")
+    pin = int(pin_name[1:])
+    if not (0 <= port <= 7 and 0 <= pin <= 15):
+        raise ValueError(f"Invalid pin name: {pin_name}")
+    return port, pin
+
+
 # Get the ADC resolution, or default to the maximum resolution supported by the MCU
 def get_adc_resolution(kb_json: Keyboard, driver: Driver):
     return kb_json.analog.adc_resolution or driver.metadata.adc.max_resolution

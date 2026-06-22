@@ -40,6 +40,7 @@ typedef enum {
   COMMAND_GET_METADATA,
   COMMAND_GET_SERIAL,
   COMMAND_SAVE_CALIBRATION_THRESHOLD,
+  COMMAND_SET_SPLIT_HANDEDNESS,
 
   COMMAND_GET_KEYMAP = 128,
   COMMAND_SET_KEYMAP,
@@ -81,6 +82,10 @@ typedef struct __attribute__((packed)) {
 typedef struct __attribute__((packed)) {
   uint32_t offset;
 } command_in_metadata_t;
+
+typedef struct __attribute__((packed)) {
+  uint8_t handedness;
+} command_in_split_handedness_t;
 
 typedef struct __attribute__((packed)) {
   uint8_t profile;
@@ -131,6 +136,7 @@ typedef struct __attribute__((packed)) {
     command_in_reset_profile_t reset_profile;
     command_in_duplicate_profile_t duplicate_profile;
     command_in_metadata_t metadata;
+    command_in_split_handedness_t split_handedness;
 
     command_in_keymap_t keymap;
     command_in_actuation_map_t actuation_map;

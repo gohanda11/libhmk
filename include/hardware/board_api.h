@@ -80,3 +80,37 @@ uint32_t board_serial(char *buf);
  * @return Current cycle count
  */
 uint32_t board_cycle_count(void);
+
+//--------------------------------------------------------------------+
+// GPIO API
+//--------------------------------------------------------------------+
+
+/**
+ * @brief Set a GPIO pin as input
+ *
+ * @param port Zero-based port index (0 = A, 1 = B, ...)
+ * @param pin Pin number (0-15)
+ *
+ * @return None
+ */
+void gpio_set_input(uint32_t port, uint32_t pin);
+
+/**
+ * @brief Set a GPIO pin as input with pull-up
+ *
+ * @param port Zero-based port index (0 = A, 1 = B, ...)
+ * @param pin Pin number (0-15)
+ *
+ * @return None
+ */
+void gpio_set_input_pullup(uint32_t port, uint32_t pin);
+
+/**
+ * @brief Read a GPIO pin
+ *
+ * @param port Zero-based port index (0 = A, 1 = B, ...)
+ * @param pin Pin number (0-15)
+ *
+ * @return true if pin is high, false otherwise
+ */
+bool gpio_read(uint32_t port, uint32_t pin);

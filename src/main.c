@@ -22,6 +22,7 @@
 #include "hid.h"
 #include "layout.h"
 #include "matrix.h"
+#include "split.h"
 #include "tusb.h"
 #include "wear_leveling.h"
 #include "xinput.h"
@@ -37,6 +38,12 @@ int main(void) {
   wear_leveling_init();
   eeconfig_init();
 
+#if defined(SPLIT_KEYBOARD)
+  // Detect handedness before analog_init() so the ADC mapping can use the
+  // correct global key offset for this half.
+  split_pre_init();
+#endif
+
   // Initialize the core modules
   analog_init();
   matrix_init();
@@ -49,11 +56,18 @@ int main(void) {
 
   tud_init(BOARD_TUD_RHPORT);
 
+#if defined(SPLIT_KEYBOARD)
+  split_post_init();
+#endif
+
   while (1) {
     tud_task();
 
     analog_task();
     matrix_scan();
+#if defined(SPLIT_KEYBOARD)
+    split_task();
+#endif
     layout_task();
     xinput_task();
   }

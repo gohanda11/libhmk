@@ -23,6 +23,7 @@
 #include "keycodes.h"
 #include "lib/bitmap.h"
 #include "matrix.h"
+#include "split.h"
 #include "xinput.h"
 
 // Layer mask. Each bit represents whether a layer is active or not.
@@ -265,6 +266,12 @@ void layout_task(void) {
     hid_send_reports();
     should_send_reports = false;
   }
+
+#if defined(SPLIT_KEYBOARD)
+  // Notify the split module of the current layer state so it can be
+  // synchronized to the slave half.
+  split_notify_layer_state(layer_mask, default_layer);
+#endif
 
   // Process deferred actions for the next matrix scan
   deferred_action_process();

@@ -1,0 +1,79 @@
+{
+  "name": "Split Test",
+  "manufacturer": "libhmk",
+  "maintainer": "libhmk",
+  "usb": {
+    "vid": "0xAB50",
+    "pid": "0xAB99",
+    "port": "hs"
+  },
+  "keyboard": {
+    "num_profiles": 2,
+    "num_layers": 2,
+    "num_keys": 4,
+    "num_advanced_keys": 4
+  },
+  "hardware": {
+    "hse_value": 12000000,
+    "driver": "at32f405xx"
+  },
+  "analog": {
+    "invert_adc": true,
+    "raw": {
+      "input": ["A0", "A1"],
+      "vector": [1, 2]
+    }
+  },
+  "calibration": {
+    "initial_rest_value": 2400,
+    "initial_bottom_out_threshold": 650
+  },
+  "split": {
+    "enabled": true,
+    "uart_instance": 1,
+    "uart_tx_pin": "B6",
+    "uart_tx_mux": 7,
+    "baud_rate": 1000000,
+    "handedness": "pin",
+    "handedness_pin": "B7",
+    "left_keys": 2,
+    "right_keys": 2,
+    "left_key_offset": 0,
+    "right_key_offset": 2,
+    "analog_left": {
+      "raw": {
+        "input": ["A0", "A1"],
+        "vector": [1, 2]
+      }
+    },
+    "analog_right": {
+      "raw": {
+        "input": ["A2", "A3"],
+        "vector": [1, 2]
+      }
+    }
+  },
+  "layout": {
+    "labels": [],
+    "keymap": [
+      [
+        { "key": 0 },
+        { "key": 1 }
+      ],
+      [
+        { "key": 2 },
+        { "key": 3 }
+      ]
+    ]
+  },
+  "keymap": [
+    [
+      "KC_A", "KC_B",
+      "KC_C", "KC_D"
+    ],
+    [
+      "KC_1", "KC_2",
+      "KC_3", "KC_4"
+    ]
+  ]
+}

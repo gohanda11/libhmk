@@ -19,6 +19,7 @@
 #include "eeconfig.h"
 #include "hardware/hardware.h"
 #include "lib/bitmap.h"
+#include "split.h"
 
 // Exponential moving average (EMA) filter
 #define EMA(x, y)                                                              \
@@ -74,102 +75,120 @@ void matrix_recalibrate(bool reset_bottom_out_threshold) {
     // Run the analog task to possibly update the ADC values
     analog_task();
 
+#if defined(SPLIT_KEYBOARD)
+    // On split keyboards, each half only has ADC inputs for its local keys.
+    // Remote keys will receive their analog state through the split transport.
+    for (uint32_t i = 0; i < split_get_num_local_keys(); i++) {
+      const uint8_t key = split_get_key_offset() + i;
+#else
     for (uint32_t i = 0; i < NUM_KEYS; i++) {
+      const uint8_t key = i;
+#endif
       const uint16_t new_adc_filtered =
-          EMA(matrix_analog_read(i), key_matrix[i].adc_filtered);
+          EMA(matrix_analog_read(key), key_matrix[key].adc_filtered);
 
-      key_matrix[i].adc_filtered = new_adc_filtered;
+      key_matrix[key].adc_filtered = new_adc_filtered;
 
       if (new_adc_filtered + MATRIX_CALIBRATION_EPSILON <=
-          key_matrix[i].adc_rest_value)
+          key_matrix[key].adc_rest_value)
         // Only update the rest value if the new value is smaller and the
         // difference is at least the calibration epsilon
-        key_matrix[i].adc_rest_value = new_adc_filtered;
+        key_matrix[key].adc_rest_value = new_adc_filtered;
 
       // Update the bottom-out value to be the minimum bottom-out value based on
       // the updated rest value
-      key_matrix[i].adc_bottom_out_value =
-          matrix_bottom_out_value(i, key_matrix[i].adc_rest_value);
+      key_matrix[key].adc_bottom_out_value =
+          matrix_bottom_out_value(key, key_matrix[key].adc_rest_value);
+    }
+  }
+}
+
+static void matrix_scan_key(uint32_t i) {
+  const uint16_t new_adc_filtered =
+      EMA(matrix_analog_read(i), key_matrix[i].adc_filtered);
+  const actuation_t *actuation = &CURRENT_PROFILE.actuation_map[i];
+
+  key_matrix[i].adc_filtered = new_adc_filtered;
+
+  if (new_adc_filtered >=
+      key_matrix[i].adc_bottom_out_value + MATRIX_CALIBRATION_EPSILON)
+    // Only update the bottom-out value if the new value is larger and the
+    // difference is at least the calibration epsilon.
+    key_matrix[i].adc_bottom_out_value = new_adc_filtered;
+
+  key_matrix[i].distance =
+      adc_to_distance(new_adc_filtered, key_matrix[i].adc_rest_value,
+                      key_matrix[i].adc_bottom_out_value);
+
+  if (bitmap_get(rapid_trigger_disabled, i) | (actuation->rt_down == 0)) {
+    key_matrix[i].key_dir = KEY_DIR_INACTIVE;
+    key_matrix[i].is_pressed =
+        (key_matrix[i].distance >= actuation->actuation_point);
+  } else {
+    const uint8_t reset_point =
+        actuation->continuous ? 0 : actuation->actuation_point;
+    const uint8_t rt_up =
+        actuation->rt_up == 0 ? actuation->rt_down : actuation->rt_up;
+
+    switch (key_matrix[i].key_dir) {
+    case KEY_DIR_INACTIVE:
+      if (key_matrix[i].distance > actuation->actuation_point) {
+        // Pressed down past actuation point
+        key_matrix[i].extremum = key_matrix[i].distance;
+        key_matrix[i].key_dir = KEY_DIR_DOWN;
+        key_matrix[i].is_pressed = true;
+      }
+      break;
+
+    case KEY_DIR_DOWN:
+      if (key_matrix[i].distance <= reset_point) {
+        // Released past reset point
+        key_matrix[i].extremum = key_matrix[i].distance;
+        key_matrix[i].key_dir = KEY_DIR_INACTIVE;
+        key_matrix[i].is_pressed = false;
+      } else if (key_matrix[i].distance + rt_up < key_matrix[i].extremum) {
+        // Released by Rapid Trigger
+        key_matrix[i].extremum = key_matrix[i].distance;
+        key_matrix[i].key_dir = KEY_DIR_UP;
+        key_matrix[i].is_pressed = false;
+      } else if (key_matrix[i].distance > key_matrix[i].extremum)
+        // Pressed down further
+        key_matrix[i].extremum = key_matrix[i].distance;
+      break;
+
+    case KEY_DIR_UP:
+      if (key_matrix[i].distance <= reset_point) {
+        // Released past reset point
+        key_matrix[i].extremum = key_matrix[i].distance;
+        key_matrix[i].key_dir = KEY_DIR_INACTIVE;
+        key_matrix[i].is_pressed = false;
+      } else if (key_matrix[i].extremum + actuation->rt_down <
+                 key_matrix[i].distance) {
+        // Pressed by Rapid Trigger
+        key_matrix[i].extremum = key_matrix[i].distance;
+        key_matrix[i].key_dir = KEY_DIR_DOWN;
+        key_matrix[i].is_pressed = true;
+      } else if (key_matrix[i].distance < key_matrix[i].extremum)
+        // Released further
+        key_matrix[i].extremum = key_matrix[i].distance;
+      break;
+
+    default:
+      break;
     }
   }
 }
 
 void matrix_scan(void) {
-  for (uint32_t i = 0; i < NUM_KEYS; i++) {
-    const uint16_t new_adc_filtered =
-        EMA(matrix_analog_read(i), key_matrix[i].adc_filtered);
-    const actuation_t *actuation = &CURRENT_PROFILE.actuation_map[i];
-
-    key_matrix[i].adc_filtered = new_adc_filtered;
-
-    if (new_adc_filtered >=
-        key_matrix[i].adc_bottom_out_value + MATRIX_CALIBRATION_EPSILON)
-      // Only update the bottom-out value if the new value is larger and the
-      // difference is at least the calibration epsilon.
-      key_matrix[i].adc_bottom_out_value = new_adc_filtered;
-
-    key_matrix[i].distance =
-        adc_to_distance(new_adc_filtered, key_matrix[i].adc_rest_value,
-                        key_matrix[i].adc_bottom_out_value);
-
-    if (bitmap_get(rapid_trigger_disabled, i) | (actuation->rt_down == 0)) {
-      key_matrix[i].key_dir = KEY_DIR_INACTIVE;
-      key_matrix[i].is_pressed =
-          (key_matrix[i].distance >= actuation->actuation_point);
-    } else {
-      const uint8_t reset_point =
-          actuation->continuous ? 0 : actuation->actuation_point;
-      const uint8_t rt_up =
-          actuation->rt_up == 0 ? actuation->rt_down : actuation->rt_up;
-
-      switch (key_matrix[i].key_dir) {
-      case KEY_DIR_INACTIVE:
-        if (key_matrix[i].distance > actuation->actuation_point) {
-          // Pressed down past actuation point
-          key_matrix[i].extremum = key_matrix[i].distance;
-          key_matrix[i].key_dir = KEY_DIR_DOWN;
-          key_matrix[i].is_pressed = true;
-        }
-        break;
-
-      case KEY_DIR_DOWN:
-        if (key_matrix[i].distance <= reset_point) {
-          // Released past reset point
-          key_matrix[i].extremum = key_matrix[i].distance;
-          key_matrix[i].key_dir = KEY_DIR_INACTIVE;
-          key_matrix[i].is_pressed = false;
-        } else if (key_matrix[i].distance + rt_up < key_matrix[i].extremum) {
-          // Released by Rapid Trigger
-          key_matrix[i].extremum = key_matrix[i].distance;
-          key_matrix[i].key_dir = KEY_DIR_UP;
-          key_matrix[i].is_pressed = false;
-        } else if (key_matrix[i].distance > key_matrix[i].extremum)
-          // Pressed down further
-          key_matrix[i].extremum = key_matrix[i].distance;
-        break;
-
-      case KEY_DIR_UP:
-        if (key_matrix[i].distance <= reset_point) {
-          // Released past reset point
-          key_matrix[i].extremum = key_matrix[i].distance;
-          key_matrix[i].key_dir = KEY_DIR_INACTIVE;
-          key_matrix[i].is_pressed = false;
-        } else if (key_matrix[i].extremum + actuation->rt_down <
-                   key_matrix[i].distance) {
-          // Pressed by Rapid Trigger
-          key_matrix[i].extremum = key_matrix[i].distance;
-          key_matrix[i].key_dir = KEY_DIR_DOWN;
-          key_matrix[i].is_pressed = true;
-        } else if (key_matrix[i].distance < key_matrix[i].extremum)
-          // Released further
-          key_matrix[i].extremum = key_matrix[i].distance;
-        break;
-
-      default:
-        break;
-      }
-    }
-  }
+#if defined(SPLIT_KEYBOARD)
+  // On split keyboards, each half only scans its own local keys. The global key
+  // offset is determined at runtime from the handedness detection.
+  for (uint32_t i = 0; i < split_get_num_local_keys(); i++)
+    matrix_scan_key(split_get_key_offset() + i);
+#else
+  for (uint32_t i = 0; i < NUM_KEYS; i++)
+    matrix_scan_key(i);
+#endif
 }
 
 void matrix_disable_rapid_trigger(uint8_t key, bool disable) {
