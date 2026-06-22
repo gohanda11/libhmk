@@ -1,7 +1,7 @@
 {
   "name": "Chai45HE",
-  "manufacturer": "Custom",
-  "maintainer": "sou16",
+  "manufacturer": "gohanda_kbd",
+  "maintainer": "gohanda",
   "usb": {
     "vid": "0xAB50",
     "pid": "0xAB45",
