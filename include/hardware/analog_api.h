@@ -113,3 +113,21 @@ void analog_task(void);
  * @return Raw ADC value
  */
 uint16_t analog_read(uint8_t key);
+
+#if defined(SPLIT_KEYBOARD)
+/**
+ * @brief Reconfigure the analog module for the detected half
+ *
+ * This is called after handedness has been determined at runtime. It updates
+ * the ADC configuration tables (mux matrix, raw input vector, etc.) to match
+ * the detected half without reinitializing the ADC peripheral.
+ *
+ * This is used for handedness methods that cannot be resolved before
+ * analog_init(), such as USB-side detection.
+ *
+ * @param is_left true if this half is the left half, false otherwise
+ *
+ * @return None
+ */
+void analog_reconfigure_handedness(bool is_left);
+#endif // defined(SPLIT_KEYBOARD)

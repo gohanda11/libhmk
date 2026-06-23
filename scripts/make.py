@@ -270,6 +270,8 @@ if kb_json.split is not None and kb_json.split.enabled:
         build_flags.define("SPLIT_HANDEDNESS_LEFT")
     elif split.handedness == "right":
         build_flags.define("SPLIT_HANDEDNESS_RIGHT")
+    elif split.handedness == "usb":
+        build_flags.define("SPLIT_HANDEDNESS_USB")
 
 # Add source build flags
 env.Append(BUILD_FLAGS=build_flags.get_flags())

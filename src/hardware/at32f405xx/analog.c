@@ -318,6 +318,23 @@ void analog_task(void) {}
 
 uint16_t analog_read(uint8_t key) { return adc_values[key]; }
 
+#if defined(SPLIT_KEYBOARD)
+void analog_reconfigure_handedness(bool is_left) {
+#if ADC_NUM_MUX_INPUTS > 0
+  mux_input_channels =
+      is_left ? mux_input_channels_left : mux_input_channels_right;
+  mux_select_ports = is_left ? mux_select_ports_left : mux_select_ports_right;
+  mux_select_pins = is_left ? mux_select_pins_left : mux_select_pins_right;
+  mux_input_matrix = is_left ? mux_input_matrix_left : mux_input_matrix_right;
+#endif
+#if ADC_NUM_RAW_INPUTS > 0
+  raw_input_channels =
+      is_left ? raw_input_channels_left : raw_input_channels_right;
+  raw_input_vector = is_left ? raw_input_vector_left : raw_input_vector_right;
+#endif
+}
+#endif // defined(SPLIT_KEYBOARD)
+
 //--------------------------------------------------------------------+
 // Interrupt Handlers
 //--------------------------------------------------------------------+

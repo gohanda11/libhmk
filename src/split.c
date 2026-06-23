@@ -146,10 +146,22 @@ static bool split_detect_left(void) {
   return split_detect_handedness_pin();
 #elif defined(SPLIT_HANDEDNESS_EEPROM)
   return eeconfig->split_handedness != 0;
+#elif defined(SPLIT_HANDEDNESS_USB)
+  // USB-side handedness is resolved after USB enumeration in split_post_init().
+  // split_pre_init() defaults to left in this mode.
+  return true;
 #else
   // Default to left if no handedness method is configured
   return true;
 #endif
+}
+
+static void split_set_handedness(bool left) {
+  is_left = left;
+  key_offset = is_left ? SPLIT_KEY_OFFSET_LEFT : SPLIT_KEY_OFFSET_RIGHT;
+  remote_key_offset = is_left ? SPLIT_KEY_OFFSET_RIGHT : SPLIT_KEY_OFFSET_LEFT;
+  num_local_keys = is_left ? SPLIT_NUM_KEYS_LEFT : SPLIT_NUM_KEYS_RIGHT;
+  num_remote_keys = is_left ? SPLIT_NUM_KEYS_RIGHT : SPLIT_NUM_KEYS_LEFT;
 }
 
 //--------------------------------------------------------------------+
@@ -458,11 +470,7 @@ static void split_slave_task(void) {
 void split_pre_init(void) {
   // Detect handedness before analog initialization so that the ADC mapping can
   // use the correct global key offset for this half.
-  is_left = split_detect_left();
-  key_offset = is_left ? SPLIT_KEY_OFFSET_LEFT : SPLIT_KEY_OFFSET_RIGHT;
-  remote_key_offset = is_left ? SPLIT_KEY_OFFSET_RIGHT : SPLIT_KEY_OFFSET_LEFT;
-  num_local_keys = is_left ? SPLIT_NUM_KEYS_LEFT : SPLIT_NUM_KEYS_RIGHT;
-  num_remote_keys = is_left ? SPLIT_NUM_KEYS_RIGHT : SPLIT_NUM_KEYS_LEFT;
+  split_set_handedness(split_detect_left());
 
   // Master/slave will be determined in split_post_init() after USB init.
   is_master = false;
@@ -479,6 +487,12 @@ void split_pre_init(void) {
 
 void split_post_init(void) {
   is_master = split_detect_master();
+
+#if defined(SPLIT_HANDEDNESS_USB)
+  // The half that enumerates over USB is always treated as the left half.
+  split_set_handedness(is_master);
+  analog_reconfigure_handedness(is_master);
+#endif
 
   if (is_master)
     split_transport_master_init();

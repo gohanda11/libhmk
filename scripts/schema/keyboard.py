@@ -133,7 +133,7 @@ class KeyboardSplit(BaseModel):
     # UART baud rate
     baud_rate: int = Field(default=1000000, ge=9600, le=10000000)
     # Handedness detection method
-    handedness: Literal["pin", "eeprom", "left", "right"] = "left"
+    handedness: Literal["pin", "eeprom", "left", "right", "usb"] = "left"
     # GPIO pin for handedness detection (high = left, low = right unless inverted)
     handedness_pin: str | None = None
     # Number of keys connected to the left half
