@@ -3,7 +3,7 @@ name: Build Workflow
 on:
   workflow_dispatch:
   pull_request:
-    branches: [main, dev]
+    branches: [main, dev, split]
     paths:
       - "setup.py"
       - "requirements.txt"
@@ -16,7 +16,7 @@ on:
       - ".github/workflows/build.yml"
       - ".github/workflows/ci_define_matrix.py"
   push:
-    branches: [main, dev]
+    branches: [main, dev, split]
     paths:
       - "setup.py"
       - "requirements.txt"
