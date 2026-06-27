@@ -30,6 +30,16 @@
 static uint16_t layer_mask;
 static uint8_t default_layer;
 
+#if defined(POINTING_DEVICE_AUTO_MOUSE_LAYER)
+// Auto-mouse layer timeout in milliseconds
+#define AUTO_MOUSE_TIMEOUT_MS 500
+
+// Auto-mouse layer state
+static uint8_t auto_mouse_layer;
+static uint32_t auto_mouse_timeout;
+static bool auto_mouse_active;
+#endif
+
 /**
  * @brief Get the current layer
  *
@@ -40,7 +50,19 @@ static uint8_t default_layer;
  */
 __attribute__((always_inline)) static inline uint8_t
 layout_get_current_layer(void) {
-  return layer_mask ? 31 - __builtin_clz(layer_mask) : default_layer;
+  uint16_t effective_layer_mask = layer_mask;
+
+#if defined(POINTING_DEVICE_AUTO_MOUSE_LAYER)
+  if (auto_mouse_active) {
+    if (timer_elapsed(auto_mouse_timeout) >= AUTO_MOUSE_TIMEOUT_MS)
+      auto_mouse_active = false;
+    else
+      effective_layer_mask |= (uint16_t)(1 << auto_mouse_layer);
+  }
+#endif
+
+  return effective_layer_mask ? 31 - __builtin_clz(effective_layer_mask)
+                              : default_layer;
 }
 
 __attribute__((always_inline)) static inline void
@@ -173,8 +195,8 @@ void layout_task(void) {
       // Key press event
       const uint8_t ak_index = advanced_key_indices[current_layer][i];
 
-      if (ak_index &&
-          CURRENT_PROFILE.advanced_keys[ak_index - 1].type == AK_TYPE_TAP_HOLD) {
+      if (ak_index && CURRENT_PROFILE.advanced_keys[ak_index - 1].type ==
+                          AK_TYPE_TAP_HOLD) {
         // Tap-hold key: process press immediately (enter TAP stage)
         const uint8_t keycode = layout_get_keycode(current_layer, i);
         active_advanced_keys[i] = ak_index;
@@ -237,8 +259,9 @@ void layout_task(void) {
   }
 
   // Pass 2: Register deferred key presses with the (potentially updated) layer.
-  // Re-read current_layer per key so that a deferred MO/layer keycode registered
-  // earlier in this pass is visible to later deferred keys in the same scan.
+  // Re-read current_layer per key so that a deferred MO/layer keycode
+  // registered earlier in this pass is visible to later deferred keys in the
+  // same scan.
   for (uint32_t i = 0; i < NUM_KEYS; i++) {
     if (!bitmap_get(deferred_presses, i))
       continue;
@@ -362,3 +385,11 @@ void layout_unregister(uint8_t key, uint8_t keycode) {
     break;
   }
 }
+
+#if defined(POINTING_DEVICE_AUTO_MOUSE_LAYER)
+void layout_set_auto_mouse_layer(uint8_t layer) {
+  auto_mouse_layer = layer;
+  auto_mouse_timeout = timer_read();
+  auto_mouse_active = true;
+}
+#endif

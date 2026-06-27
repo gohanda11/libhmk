@@ -238,6 +238,8 @@ uint32_t board_serial(char *buf) {
 
 uint32_t board_cycle_count(void) { return DWT->CYCCNT; }
 
+uint32_t board_clock_frequency(void) { return system_core_clock; }
+
 //--------------------------------------------------------------------+
 // Interrupt Handlers
 //--------------------------------------------------------------------+
@@ -324,4 +326,18 @@ bool gpio_read(uint32_t port, uint32_t pin) {
     return false;
   return gpio_input_data_bit_read(gpio_port_map[port], gpio_pin_mask(pin)) !=
          RESET;
+}
+
+void gpio_set_output(uint32_t port, uint32_t pin) {
+  gpio_init_pin(port, pin, GPIO_MODE_OUTPUT, GPIO_PULL_NONE);
+}
+
+void gpio_write(uint32_t port, uint32_t pin, bool high) {
+  if (port >= M_ARRAY_SIZE(gpio_port_map) || gpio_port_map[port] == NULL)
+    return;
+
+  if (high)
+    gpio_port_map[port]->scr = gpio_pin_mask(pin);
+  else
+    gpio_port_map[port]->clr = gpio_pin_mask(pin);
 }

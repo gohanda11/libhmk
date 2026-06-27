@@ -91,6 +91,12 @@ static void hid_send_hid_report(uint8_t starting_report_id) {
       prev_mouse_report = mouse_report;
       tud_hid_n_report(USB_ITF_HID, report_id, &mouse_report,
                        sizeof(mouse_report));
+      // Relative movement is consumed by the host per report, so clear it after
+      // sending while preserving button state for future comparisons.
+      mouse_report.x = 0;
+      mouse_report.y = 0;
+      prev_mouse_report.x = 0;
+      prev_mouse_report.y = 0;
       return;
 
     default:
@@ -194,6 +200,41 @@ void hid_keycode_remove(uint8_t keycode) {
   default:
     break;
   }
+}
+
+void hid_mouse_move(int8_t x, int8_t y) {
+  int16_t new_x = (int16_t)mouse_report.x + (int16_t)x;
+  int16_t new_y = (int16_t)mouse_report.y + (int16_t)y;
+
+  if (new_x > 127)
+    new_x = 127;
+  else if (new_x < -128)
+    new_x = -128;
+
+  if (new_y > 127)
+    new_y = 127;
+  else if (new_y < -128)
+    new_y = -128;
+
+  mouse_report.x = (int8_t)new_x;
+  mouse_report.y = (int8_t)new_y;
+}
+
+void hid_send_mouse_report(void) {
+#if !defined(HID_DISABLED)
+#if defined(SPLIT_KEYBOARD)
+  if (!split_is_master())
+    return;
+#endif
+
+  if (tud_suspended())
+    tud_remote_wakeup();
+
+  while (!tud_hid_n_ready(USB_ITF_HID))
+    tud_task();
+
+  hid_send_hid_report(REPORT_ID_MOUSE);
+#endif
 }
 
 void hid_send_reports(void) {

@@ -91,9 +91,37 @@ Split behavior is configured under the top-level `split` object:
 
 ### Handedness Detection
 
-- `"pin"`: The configured `handedness_pin` is read with an internal pull-up. By default, **HIGH = left**, **LOW = right**. Set `handedness_pin_low_is_left: true` to swap this.
-- `"eeprom"`: The side is read from EEPROM. It can be changed at runtime with the `COMMAND_SET_SPLIT_HANDEDNESS` command (e.g., from hmkconf). The default is controlled by `eeprom_default_handedness`.
-- `"left"` / `"right"`: The side is fixed at compile time. Useful for testing or for builds that are never swapped between halves.
+Handedness determines whether a half acts as the **left** or **right** side of the keyboard. It is independent of master/slave selection: the half that enumerates over USB becomes the master, while the other half becomes the slave.
+
+| Value | Behavior | Use case |
+|---|---|---|
+| `"usb"` | The USB-connected half is always treated as the **left** half. This is the simplest method when the same firmware binary is flashed to both halves and the left half is normally the one plugged into USB. | No extra GPIO wiring required. |
+| `"pin"` | The configured `handedness_pin` is read with an internal pull-up. By default, **HIGH = left**, **LOW = right**. Set `handedness_pin_low_is_left: true` to swap this. | A GPIO is wired to `3.3V` on the left half and `GND` on the right half, so each half knows its physical position regardless of which side is USB-connected. |
+| `"eeprom"` | The side is read from EEPROM. It can be changed at runtime with the `COMMAND_SET_SPLIT_HANDEDNESS` command (e.g., from hmkconf). The default is controlled by `eeprom_default_handedness`. | The side is configured in software after flashing, useful when no dedicated handedness pin is available. |
+| `"left"` / `"right"` | The side is fixed at compile time. | Useful for testing or for builds that are never swapped between halves. |
+
+#### Pin Wiring Example
+
+For `"handedness": "pin"`, choose any unused GPIO and wire it as follows:
+
+```text
+Left half:   handedness_pin ── 3.3V
+Right half:  handedness_pin ── GND
+```
+
+The pin is configured with an internal pull-up, so it reads HIGH when left floating. On the right half, tying it to GND overrides the pull-up and gives a LOW reading. No external pull-up resistor is required, but a series resistor (e.g., 1 kΩ) between the pin and 3.3V/GND can be added for extra protection.
+
+```json
+"split": {
+  "enabled": true,
+  "handedness": "pin",
+  "handedness_pin": "B12",
+  "left_keys": 30,
+  "right_keys": 39,
+  "left_key_offset": 0,
+  "right_key_offset": 30
+}
+```
 
 ### Key Numbering and Layout
 

@@ -20,6 +20,7 @@
 #include "layout.h"
 #include "matrix.h"
 #include "metadata.h"
+#include "sensors/pmw3610.h"
 #include "split.h"
 #include "split_protocol.h"
 #include "tusb.h"
@@ -173,6 +174,20 @@ void command_process(const uint8_t *buf) {
     const command_in_split_handedness_t *p = &in->split_handedness;
     COMMAND_VERIFY(p->handedness <= 1);
     success = EECONFIG_WRITE(split_handedness, &p->handedness);
+#else
+    success = false;
+#endif
+    break;
+  }
+  case COMMAND_POINTING_DEVICE_INFO: {
+#if defined(POINTING_DEVICE_ENABLED)
+    pmw3610_info_t info;
+    pmw3610_get_info(&info);
+    out->pointing_device_info.product_id = info.product_id;
+    out->pointing_device_info.observation = info.observation;
+    out->pointing_device_info.motion = info.motion;
+    out->pointing_device_info.irq_low = info.irq_low ? 1 : 0;
+    out->pointing_device_info.init_ok = info.init_ok ? 1 : 0;
 #else
     success = false;
 #endif

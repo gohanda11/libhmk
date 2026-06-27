@@ -40,6 +40,13 @@
 #error "SPLIT_UART_BAUD_RATE is not defined"
 #endif
 
+#if !defined(SPLIT_UART_TURNAROUND_DELAY_US)
+// Short guard time between the end of a half-duplex transmission and the
+// release of the driver. This gives the receiver time to switch from TX back
+// to RX before the other half starts its response.
+#define SPLIT_UART_TURNAROUND_DELAY_US 20
+#endif
+
 //--------------------------------------------------------------------+
 // USART Instance Mapping
 //--------------------------------------------------------------------+
@@ -110,6 +117,17 @@ static void split_gpio_clock_enable(uint32_t port) {
   }
 }
 
+static void split_transport_turnaround_delay(void) {
+#if SPLIT_UART_TURNAROUND_DELAY_US > 0
+  // Rough microsecond busy loop. The divisor is an estimate of the cycles
+  // consumed by one loop iteration; the exact value is not critical.
+  const uint32_t count =
+      (F_CPU / 1000000UL) * SPLIT_UART_TURNAROUND_DELAY_US / 8;
+  for (volatile uint32_t i = 0; i < count; i++)
+    ;
+#endif
+}
+
 static void split_gpio_init(uint32_t port, uint32_t pin, uint32_t mux) {
   if (port >= M_ARRAY_SIZE(gpio_port_map) || gpio_port_map[port] == NULL)
     return;
@@ -136,6 +154,9 @@ static void split_gpio_init(uint32_t port, uint32_t pin, uint32_t mux) {
 void split_transport_master_init(void) {
   split_usart_clock_enable();
 
+  // The Split60HE hardware connects the halves with a single TRRS data line
+  // (PA9) and no external pull-up resistor, so the TX pin must actively drive
+  // the line with push-pull output.
   split_gpio_init(SPLIT_UART_TX_PORT, SPLIT_UART_TX_PIN, SPLIT_UART_TX_MUX);
 #if !defined(SPLIT_UART_HALF_DUPLEX)
   split_gpio_init(SPLIT_UART_RX_PORT, SPLIT_UART_RX_PIN, SPLIT_UART_RX_MUX);
@@ -203,6 +224,10 @@ bool split_transport_send(const uint8_t *data, uint8_t len) {
     }
   }
 
+  // Small guard time before releasing the line in half-duplex mode so the
+  // other half is ready to receive the response.
+  split_transport_turnaround_delay();
+
   split_transport_disable_tx();
   return true;
 }
@@ -227,6 +252,12 @@ void split_transport_clear(void) {
   while (usart_flag_get(usart, USART_RDBF_FLAG) != RESET) {
     (void)usart_data_receive(usart);
   }
+
+  // Clear any receiver error flags so reception can resume after a framing or
+  // overrun error. Reading the data register already clears most flags; this
+  // ensures the overrun flag is also reset.
+  usart_flag_clear(usart, USART_PERR_FLAG | USART_FERR_FLAG | USART_NERR_FLAG |
+                              USART_ROERR_FLAG);
 }
 
 bool split_transport_available(void) {

@@ -25,7 +25,11 @@ driver = utils.get_driver(keyboard)
 driver_name = kb_json.hardware.driver
 
 # Add source filter for driver source files
-env.Append(SRC_FILTER=["-<hardware/>", f"+<hardware/{driver_name}/>"])
+env.Append(SRC_FILTER=[
+    "-<hardware/>",
+    f"+<hardware/{driver_name}/>",
+    "+<hardware/spi_soft.c>",
+])
 
 # Build Flags
 build_flags = utils.CompilerFlags()
@@ -272,6 +276,73 @@ if kb_json.split is not None and kb_json.split.enabled:
         build_flags.define("SPLIT_HANDEDNESS_RIGHT")
     elif split.handedness == "usb":
         build_flags.define("SPLIT_HANDEDNESS_USB")
+
+# Pointing Device Configuration
+if kb_json.pointing_device is not None and kb_json.pointing_device.enabled:
+    pd = kb_json.pointing_device
+
+    if pd.sensor != "pmw3610":
+        raise ValueError(f"Unsupported pointing device sensor: {pd.sensor}")
+
+    build_flags.define("POINTING_DEVICE_ENABLED")
+    build_flags.define("POINTING_DEVICE_SENSOR_PMW3610")
+
+    if pd.side == "left":
+        build_flags.define("POINTING_DEVICE_SIDE_LEFT")
+    else:
+        build_flags.define("POINTING_DEVICE_SIDE_RIGHT")
+
+    cs_port, cs_pin = utils.pin_name_to_port_pin(pd.pins.cs)
+    sck_port, sck_pin = utils.pin_name_to_port_pin(pd.pins.sck)
+    mosi_port, mosi_pin = utils.pin_name_to_port_pin(pd.pins.mosi)
+    miso_port, miso_pin = utils.pin_name_to_port_pin(pd.pins.miso)
+
+    build_flags.define("PMW3610_CS_PORT", cs_port)
+    build_flags.define("PMW3610_CS_PIN", cs_pin)
+    build_flags.define("PMW3610_SCK_PORT", sck_port)
+    build_flags.define("PMW3610_SCK_PIN", sck_pin)
+    build_flags.define("PMW3610_MOSI_PORT", mosi_port)
+    build_flags.define("PMW3610_MOSI_PIN", mosi_pin)
+    build_flags.define("PMW3610_MISO_PORT", miso_port)
+    build_flags.define("PMW3610_MISO_PIN", miso_pin)
+
+    if pd.pins.irq is not None:
+        irq_port, irq_pin = utils.pin_name_to_port_pin(pd.pins.irq)
+        build_flags.define("PMW3610_IRQ_PIN")
+        build_flags.define("PMW3610_IRQ_PORT", irq_port)
+        build_flags.define("PMW3610_IRQ_PIN_NUM", irq_pin)
+
+    if pd.cpi % 200 != 0:
+        raise ValueError("PMW3610 CPI must be a multiple of 200")
+
+    build_flags.define("PMW3610_CPI", pd.cpi)
+
+    # Convert angle to swap/invert, then XOR with explicit user overrides
+    angle_swap, angle_inv_x, angle_inv_y = False, False, False
+    if pd.angle == 0:
+        angle_swap, angle_inv_x, angle_inv_y = False, False, False
+    elif pd.angle == 90:
+        angle_swap, angle_inv_x, angle_inv_y = True, True, False
+    elif pd.angle == 180:
+        angle_swap, angle_inv_x, angle_inv_y = False, True, True
+    elif pd.angle == 270:
+        angle_swap, angle_inv_x, angle_inv_y = True, False, True
+    else:
+        raise ValueError("pointing_device.angle must be 0, 90, 180, or 270")
+
+    final_swap = angle_swap ^ pd.swap_xy
+    final_inv_x = angle_inv_x ^ pd.invert_x
+    final_inv_y = angle_inv_y ^ pd.invert_y
+
+    if final_swap:
+        build_flags.define("PMW3610_SWAP_XY")
+    if final_inv_x:
+        build_flags.define("PMW3610_INVERT_X")
+    if final_inv_y:
+        build_flags.define("PMW3610_INVERT_Y")
+
+    if pd.auto_mouse_layer >= 0:
+        build_flags.define("POINTING_DEVICE_AUTO_MOUSE_LAYER", pd.auto_mouse_layer)
 
 # Add source build flags
 env.Append(BUILD_FLAGS=build_flags.get_flags())

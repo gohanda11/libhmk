@@ -64,3 +64,15 @@ void layout_register(uint8_t key, uint8_t keycode);
  * @return None
  */
 void layout_unregister(uint8_t key, uint8_t keycode);
+
+/**
+ * @brief Temporarily activate a layer while the pointing device is in use
+ *
+ * The layer will remain active until AUTO_MOUSE_TIMEOUT_MS has elapsed without
+ * a subsequent call to this function.
+ *
+ * @param layer Layer to activate
+ *
+ * @return None
+ */
+void layout_set_auto_mouse_layer(uint8_t layer);

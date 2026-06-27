@@ -41,6 +41,7 @@ typedef enum {
   COMMAND_GET_SERIAL,
   COMMAND_SAVE_CALIBRATION_THRESHOLD,
   COMMAND_SET_SPLIT_HANDEDNESS,
+  COMMAND_POINTING_DEVICE_INFO,
 
   COMMAND_GET_KEYMAP = 128,
   COMMAND_SET_KEYMAP,
@@ -164,6 +165,14 @@ typedef struct __attribute__((packed)) {
   uint8_t metadata[59];
 } command_out_metadata_t;
 
+typedef struct __attribute__((packed)) {
+  uint8_t product_id;
+  uint8_t observation;
+  uint8_t motion;
+  uint8_t irq_low;
+  uint8_t init_ok;
+} command_out_pointing_device_info_t;
+
 // Command output buffer type
 typedef struct __attribute__((packed)) {
   uint8_t command_id;
@@ -172,6 +181,8 @@ typedef struct __attribute__((packed)) {
     uint16_t firmware_version;
     // For `COMMAND_ANALOG_INFO`
     command_out_analog_info_t analog_info[21];
+    // For `COMMAND_POINTING_DEVICE_INFO`
+    command_out_pointing_device_info_t pointing_device_info;
     // For `COMMAND_GET_CALIBRATION`
     eeconfig_calibration_t calibration;
     // For `COMMAND_GET_PROFILE`

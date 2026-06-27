@@ -1,0 +1,297 @@
+/*
+ * This program is free software: you can redistribute it and/or modify it under
+ * the terms of the GNU General Public License as published by the Free Software
+ * Foundation, either version 3 of the License, or (at your option) any later
+ * version.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ * FOR A PARTICULAR PURPOSE. See the GNU General Public License for more
+ * details.
+ *
+ * You should have received a copy of the GNU General Public License along with
+ * this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
+#include "sensors/pmw3610.h"
+
+#if defined(POINTING_DEVICE_ENABLED)
+
+#include "hardware/hardware.h"
+#include "hardware/spi_api.h"
+
+//--------------------------------------------------------------------+
+// Configuration
+//--------------------------------------------------------------------+
+
+#if !defined(PMW3610_SPI_FREQUENCY)
+// Target SPI frequency for the PMW3610 (max 2 MHz)
+#define PMW3610_SPI_FREQUENCY 2000000
+#endif
+
+#if !defined(PMW3610_CLOCK_ON_DELAY_US)
+// Delay required after enabling the sensor SPI clock
+#define PMW3610_CLOCK_ON_DELAY_US 300
+#endif
+
+// SPI timing constants for the PMW3610 (values in microseconds).
+// Sub-microsecond delays from the datasheet are rounded up to 1 us because
+// this firmware uses a busy-wait loop with microsecond granularity.
+#define T_NCS_SCLK_US 1    // 120 ns, NCS low to first SCLK
+#define T_SCLK_NCS_WR_US 10 // 10 us, last SCLK to NCS high for writes
+#define T_SRAD_US 4        // 4 us, address write to data read
+#define T_SRAD_MOTBR_US 4  // 4 us, burst address to data read
+#define T_SRX_US 1         // 250 ns, last SCLK to NCS high for reads
+#define T_SWX_US 30        // 30 us, NCS high to next NCS low for writes
+#define T_BEXIT_US 1       // 250 ns, last SCLK to NCS high for burst reads
+
+//--------------------------------------------------------------------+
+// Pin Macros
+//--------------------------------------------------------------------+
+
+#define CS_LOW() gpio_write(PMW3610_CS_PORT, PMW3610_CS_PIN, false)
+#define CS_HIGH() gpio_write(PMW3610_CS_PORT, PMW3610_CS_PIN, true)
+
+//--------------------------------------------------------------------+
+// State
+//--------------------------------------------------------------------+
+
+static bool init_ok = false;
+
+//--------------------------------------------------------------------+
+// Helpers
+//--------------------------------------------------------------------+
+
+static void pmw3610_delay_us(uint32_t us) {
+  const uint32_t system_clock = board_clock_frequency();
+  const uint32_t cycles = (system_clock / 1000000) * us;
+  const uint32_t start = board_cycle_count();
+  while ((board_cycle_count() - start) < cycles)
+    ;
+}
+
+static void pmw3610_write_byte(uint8_t byte) {
+  spi_soft_transfer_byte(byte);
+}
+
+static uint8_t pmw3610_read_byte(void) {
+  return spi_soft_transfer_byte(0x00);
+}
+
+static void pmw3610_write_reg_internal(uint8_t reg, uint8_t value) {
+  CS_LOW();
+  pmw3610_delay_us(T_NCS_SCLK_US);
+  spi_soft_set_sdio_input(false);
+  pmw3610_write_byte(reg | PMW3610_SPI_WRITE_BIT);
+  pmw3610_write_byte(value);
+  pmw3610_delay_us(T_SCLK_NCS_WR_US);
+  CS_HIGH();
+  pmw3610_delay_us(T_SWX_US);
+}
+
+static uint8_t pmw3610_read_reg_internal(uint8_t reg) {
+  CS_LOW();
+  pmw3610_delay_us(T_NCS_SCLK_US);
+  // In 3-wire mode the bidirectional SDIO pin must be driven while sending
+  // the address and switched to input before receiving data.
+  spi_soft_set_sdio_input(false);
+  pmw3610_write_byte(reg);
+  spi_soft_set_sdio_input(true);
+  pmw3610_delay_us(T_SRAD_US);
+  const uint8_t value = pmw3610_read_byte();
+  pmw3610_delay_us(T_SRX_US);
+  CS_HIGH();
+  return value;
+}
+
+static void pmw3610_spi_clock_on(void) {
+  pmw3610_write_reg_internal(PMW3610_REG_SPI_CLK_ON_REQ,
+                             PMW3610_SPI_CLOCK_CMD_ENABLE);
+  pmw3610_delay_us(PMW3610_CLOCK_ON_DELAY_US);
+}
+
+static void pmw3610_spi_clock_off(void) {
+  pmw3610_write_reg_internal(PMW3610_REG_SPI_CLK_ON_REQ,
+                             PMW3610_SPI_CLOCK_CMD_DISABLE);
+}
+
+static void pmw3610_write_reg(uint8_t reg, uint8_t value) {
+  pmw3610_spi_clock_on();
+  pmw3610_write_reg_internal(reg, value);
+  pmw3610_spi_clock_off();
+}
+
+static uint8_t pmw3610_read_reg(uint8_t reg) {
+  pmw3610_spi_clock_on();
+  const uint8_t value = pmw3610_read_reg_internal(reg);
+  pmw3610_spi_clock_off();
+  return value;
+}
+
+static void pmw3610_set_cpi(uint16_t cpi) {
+  uint8_t value = (uint8_t)(cpi / 200);
+
+#if defined(PMW3610_SWAP_XY)
+  value |= (1 << 7);
+#endif
+#if defined(PMW3610_INVERT_X)
+  value |= (1 << 6);
+#endif
+#if defined(PMW3610_INVERT_Y)
+  value |= (1 << 5);
+#endif
+
+  pmw3610_spi_clock_on();
+  pmw3610_write_reg_internal(PMW3610_REG_SPI_PAGE0, 0xFF);
+  pmw3610_write_reg_internal(PMW3610_REG_RES_STEP, value);
+  pmw3610_write_reg_internal(PMW3610_REG_SPI_PAGE0, 0x00);
+  pmw3610_spi_clock_off();
+}
+
+static void pmw3610_read_burst(uint8_t reg, uint8_t *buf, uint8_t len) {
+  pmw3610_spi_clock_on();
+  CS_LOW();
+  pmw3610_delay_us(T_NCS_SCLK_US);
+  // In 3-wire mode the bidirectional SDIO pin must be driven while sending
+  spi_soft_set_sdio_input(false);
+  // the burst address and switched to input before receiving data.
+  spi_soft_set_sdio_input(false);
+  pmw3610_write_byte(reg);
+  spi_soft_set_sdio_input(true);
+  pmw3610_delay_us(T_SRAD_MOTBR_US);
+  for (uint8_t i = 0; i < len; i++)
+    buf[i] = pmw3610_read_byte();
+  pmw3610_delay_us(T_BEXIT_US);
+  CS_HIGH();
+  pmw3610_spi_clock_off();
+}
+
+//--------------------------------------------------------------------+
+// Initialization
+//--------------------------------------------------------------------+
+
+bool pmw3610_init(void) {
+  // Initialize chip-select high
+  gpio_set_output(PMW3610_CS_PORT, PMW3610_CS_PIN);
+  CS_HIGH();
+
+  // Initialize soft SPI in mode 3 (CPOL=1, CPHA=1), MSB first
+  spi_soft_init(PMW3610_SCK_PORT, PMW3610_SCK_PIN, PMW3610_MOSI_PORT,
+                PMW3610_MOSI_PIN, PMW3610_MISO_PORT, PMW3610_MISO_PIN);
+  spi_soft_set_mode(1, 1);
+  spi_soft_set_frequency(PMW3610_SPI_FREQUENCY);
+
+#if defined(PMW3610_IRQ_PIN)
+  // The PMW3610 MOTION pin is active-low; enable the internal pull-up so the
+  // line sits high when no motion is detected.
+  gpio_set_input_pullup(PMW3610_IRQ_PORT, PMW3610_IRQ_PIN_NUM);
+#endif
+
+  // Reset the SPI port and wait for at least one frame, as required by the
+  // power-up sequence in the PMW3610 datasheet.
+  CS_LOW();
+  pmw3610_delay_us(1);
+  CS_HIGH();
+  pmw3610_delay_us(150);
+
+  // Power-up reset. The sensor requires the SPI clock to be enabled before
+  // any register access, including the power-up reset command.
+  pmw3610_spi_clock_on();
+  pmw3610_write_reg_internal(PMW3610_REG_POWER_UP_RESET,
+                             PMW3610_POWERUP_CMD_RESET);
+  pmw3610_spi_clock_off();
+  timer_delay(10);
+
+  // Clear observation register
+  pmw3610_write_reg(PMW3610_REG_OBSERVATION, 0x00);
+  timer_delay(200);
+
+  // Verify observation register and product ID
+  const uint8_t observation = pmw3610_read_reg(PMW3610_REG_OBSERVATION);
+  if ((observation & 0x0F) != 0x0F) {
+    init_ok = false;
+    return false;
+  }
+
+  const uint8_t product_id = pmw3610_read_reg(PMW3610_REG_PRODUCT_ID);
+  if (product_id != PMW3610_PRODUCT_ID) {
+    init_ok = false;
+    return false;
+  }
+
+  timer_delay(50);
+
+  // Clear motion registers
+  for (uint8_t reg = PMW3610_REG_MOTION; reg <= PMW3610_REG_DELTA_XY_H; reg++)
+    (void)pmw3610_read_reg(reg);
+
+  // Configure performance: run at 4 ms polling interval while awake
+  pmw3610_write_reg(PMW3610_REG_PERFORMANCE, 0x0D);
+
+  // Configure CPI and axis orientation
+  pmw3610_set_cpi(PMW3610_CPI);
+
+  // Configure downshift and sample rates
+  pmw3610_write_reg(PMW3610_REG_RUN_DOWNSHIFT, 0x20);
+  pmw3610_write_reg(PMW3610_REG_REST1_RATE, 0x04);
+  pmw3610_write_reg(PMW3610_REG_REST1_DOWNSHIFT, 0x01);
+  pmw3610_write_reg(PMW3610_REG_REST2_RATE, 0x0A);
+  pmw3610_write_reg(PMW3610_REG_REST2_DOWNSHIFT, 0x01);
+  pmw3610_write_reg(PMW3610_REG_REST3_RATE, 0x64);
+
+  init_ok = true;
+  return true;
+}
+
+//--------------------------------------------------------------------+
+// Motion Reading
+//--------------------------------------------------------------------+
+
+bool pmw3610_read_motion(int16_t *dx, int16_t *dy) {
+#if defined(PMW3610_IRQ_PIN)
+  // MOTION is active-low. If the pin is high there is no new motion data.
+  if (gpio_read(PMW3610_IRQ_PORT, PMW3610_IRQ_PIN_NUM))
+    return false;
+#endif
+
+  uint8_t buf[PMW3610_BURST_SIZE];
+  pmw3610_read_burst(PMW3610_REG_MOTION_BURST, buf, PMW3610_BURST_SIZE);
+
+  if ((buf[0] & 0x80) == 0)
+    return false;
+
+  uint16_t x_raw = (uint16_t)(buf[PMW3610_BURST_X_L_POS] |
+                              ((buf[PMW3610_BURST_XY_H_POS] & 0xF0) << 4));
+  uint16_t y_raw = (uint16_t)(buf[PMW3610_BURST_Y_L_POS] |
+                              ((buf[PMW3610_BURST_XY_H_POS] & 0x0F) << 8));
+
+  int16_t x = (int16_t)x_raw;
+  int16_t y = (int16_t)y_raw;
+
+  if (x & 0x0800)
+    x |= 0xF000;
+  if (y & 0x0800)
+    y |= 0xF000;
+
+  *dx = x;
+  *dy = y;
+
+  // Clear residual motion so the next burst read sees only new deltas.
+  pmw3610_write_reg(PMW3610_REG_MOTION, 0x00);
+
+  return true;
+}
+
+void pmw3610_get_info(pmw3610_info_t *info) {
+  info->product_id = pmw3610_read_reg(PMW3610_REG_PRODUCT_ID);
+  info->observation = pmw3610_read_reg(PMW3610_REG_OBSERVATION);
+  info->motion = pmw3610_read_reg(PMW3610_REG_MOTION);
+#if defined(PMW3610_IRQ_PIN)
+  info->irq_low = !gpio_read(PMW3610_IRQ_PORT, PMW3610_IRQ_PIN_NUM);
+#else
+  info->irq_low = false;
+#endif
+  info->init_ok = init_ok;
+}
+
+#endif // defined(POINTING_DEVICE_ENABLED)

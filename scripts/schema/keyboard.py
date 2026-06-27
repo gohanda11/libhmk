@@ -160,6 +160,44 @@ class KeyboardActuation(BaseModel):
     actuation_point: int = Field(ge=0, le=255)
 
 
+# Pointing Device Pin Configuration
+class KeyboardPointingDevicePins(BaseModel):
+    # Chip-select GPIO pin name
+    cs: str
+    # SPI clock GPIO pin name
+    sck: str
+    # SPI MOSI GPIO pin name
+    mosi: str
+    # SPI MISO GPIO pin name
+    miso: str
+    # Optional motion interrupt GPIO pin name
+    irq: str | None = None
+
+
+# Pointing Device Configuration
+class KeyboardPointingDevice(BaseModel):
+    # Enable pointing device support
+    enabled: bool = False
+    # Sensor type. Currently only "pmw3610" is supported.
+    sensor: str = Field(default="pmw3610", pattern=r"^(pmw3610)$")
+    # Which half the sensor is connected to (only used for split keyboards)
+    side: Literal["left", "right"] = "right"
+    # GPIO pin assignments
+    pins: KeyboardPointingDevicePins
+    # CPI (counts per inch). PMW3610 supports 200-3200 in steps of 200.
+    cpi: int = Field(default=800, ge=200, le=3200)
+    # Sensor rotation angle in degrees. Must be one of 0, 90, 180, 270.
+    angle: int = Field(default=0, ge=0, le=270)
+    # Swap X and Y axes (applied after angle rotation)
+    swap_xy: bool = False
+    # Invert X axis
+    invert_x: bool = False
+    # Invert Y axis
+    invert_y: bool = False
+    # Layer to temporarily activate when the sensor is moved (-1 to disable)
+    auto_mouse_layer: int = Field(default=-1, ge=-1, le=7)
+
+
 # keyboard.json Schema
 class Keyboard(BaseModel):
     name: str
@@ -178,3 +216,4 @@ class Keyboard(BaseModel):
     # Default keymaps for each profile. If not specified, the default keymap will be used for all profiles.
     keymaps: list[list[list[str]]] | None = None
     actuation: KeyboardActuation | None = None
+    pointing_device: KeyboardPointingDevice | None = None

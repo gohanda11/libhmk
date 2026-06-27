@@ -54,3 +54,23 @@ void hid_keycode_remove(uint8_t keycode);
  * @return None
  */
 void hid_send_reports(void);
+
+/**
+ * @brief Add a mouse movement delta to the mouse HID report
+ *
+ * @param x X-axis delta (int8_t range)
+ * @param y Y-axis delta (int8_t range)
+ *
+ * @return None
+ */
+void hid_mouse_move(int8_t x, int8_t y);
+
+/**
+ * @brief Send only the mouse HID report
+ *
+ * This is used for relative pointing-device motion, which must not wait for a
+ * keyboard state change before being emitted.
+ *
+ * @return None
+ */
+void hid_send_mouse_report(void);

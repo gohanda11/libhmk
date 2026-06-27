@@ -79,12 +79,16 @@ def to_slice_def(name: str, arr: list | bytes):
     return f"#define {name.upper()} {', '.join(str(x) for x in arr)}"
 
 
-# Convert a GPIO pin name (e.g., "B6") to a zero-based port index and pin number
+# Convert a GPIO pin name (e.g., "B6" or "PF6") to a zero-based port index and pin number
 def pin_name_to_port_pin(pin_name: str) -> tuple[int, int]:
     if len(pin_name) < 2:
         raise ValueError(f"Invalid pin name: {pin_name}")
-    port = ord(pin_name[0].upper()) - ord("A")
-    pin = int(pin_name[1:])
+    port_str = "".join(ch for ch in pin_name if ch.isalpha())
+    pin_str = "".join(ch for ch in pin_name if ch.isdigit())
+    if len(port_str) == 0 or len(pin_str) == 0:
+        raise ValueError(f"Invalid pin name: {pin_name}")
+    port = ord(port_str[-1].upper()) - ord("A")
+    pin = int(pin_str)
     if not (0 <= port <= 7 and 0 <= pin <= 15):
         raise ValueError(f"Invalid pin name: {pin_name}")
     return port, pin

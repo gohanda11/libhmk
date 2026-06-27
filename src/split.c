@@ -22,6 +22,7 @@
 #include "hardware/split_transport_api.h"
 #include "lib/bitmap.h"
 #include "matrix.h"
+#include "pointing_device.h"
 #include "split_protocol.h"
 
 //--------------------------------------------------------------------+
@@ -71,8 +72,6 @@ typedef struct __attribute__((packed)) {
 
 typedef struct __attribute__((packed)) {
   uint16_t adc_filtered[SPLIT_NUM_KEYS_LOCAL_MAX];
-  uint16_t adc_rest_value[SPLIT_NUM_KEYS_LOCAL_MAX];
-  uint16_t adc_bottom_out_value[SPLIT_NUM_KEYS_LOCAL_MAX];
   uint8_t distance[SPLIT_NUM_KEYS_LOCAL_MAX];
 } split_analog_state_payload_t;
 
@@ -169,11 +168,12 @@ static void split_set_handedness(bool left) {
 //--------------------------------------------------------------------+
 
 static uint8_t split_key_state_payload_size(uint8_t n) {
-  return (uint8_t)(M_DIV_CEIL((uint32_t)n, 32) * sizeof(bitmap_t) + (uint32_t)n);
+  return (uint8_t)(M_DIV_CEIL((uint32_t)n, 32) * sizeof(bitmap_t) +
+                   (uint32_t)n);
 }
 
 static uint8_t split_analog_state_payload_size(uint8_t n) {
-  return (uint8_t)((uint32_t)n * (3 * sizeof(uint16_t) + sizeof(uint8_t)));
+  return (uint8_t)((uint32_t)n * (sizeof(uint16_t) + sizeof(uint8_t)));
 }
 
 static void split_build_key_state_payload(split_key_state_payload_t *payload) {
@@ -186,8 +186,8 @@ static void split_build_key_state_payload(split_key_state_payload_t *payload) {
   }
 }
 
-static void split_apply_key_state_payload(
-    const split_key_state_payload_t *payload) {
+static void
+split_apply_key_state_payload(const split_key_state_payload_t *payload) {
   for (uint32_t i = 0; i < num_remote_keys; i++) {
     const uint8_t key = remote_key_offset + i;
     key_matrix[key].is_pressed = bitmap_get(payload->pressed_bitmap, i);
@@ -195,24 +195,20 @@ static void split_apply_key_state_payload(
   }
 }
 
-static void split_build_analog_state_payload(
-    split_analog_state_payload_t *payload) {
+static void
+split_build_analog_state_payload(split_analog_state_payload_t *payload) {
   for (uint32_t i = 0; i < num_local_keys; i++) {
     const uint8_t key = key_offset + i;
     payload->adc_filtered[i] = key_matrix[key].adc_filtered;
-    payload->adc_rest_value[i] = key_matrix[key].adc_rest_value;
-    payload->adc_bottom_out_value[i] = key_matrix[key].adc_bottom_out_value;
     payload->distance[i] = key_matrix[key].distance;
   }
 }
 
-static void split_apply_analog_state_payload(
-    const split_analog_state_payload_t *payload) {
+static void
+split_apply_analog_state_payload(const split_analog_state_payload_t *payload) {
   for (uint32_t i = 0; i < num_remote_keys; i++) {
     const uint8_t key = remote_key_offset + i;
     key_matrix[key].adc_filtered = payload->adc_filtered[i];
-    key_matrix[key].adc_rest_value = payload->adc_rest_value[i];
-    key_matrix[key].adc_bottom_out_value = payload->adc_bottom_out_value[i];
     key_matrix[key].distance = payload->distance[i];
   }
   memcpy(&cached_analog_state, payload, sizeof(cached_analog_state));
@@ -229,8 +225,7 @@ static uint32_t split_remaining_timeout(uint32_t start, uint32_t timeout_ms) {
 }
 
 static bool split_receive_frame(uint8_t *type, uint8_t *payload,
-                                uint8_t *payload_len,
-                                uint32_t timeout_ms) {
+                                uint8_t *payload_len, uint32_t timeout_ms) {
   const uint32_t start = timer_read();
   uint8_t header[3];
 
@@ -293,9 +288,8 @@ static bool split_receive_frame(uint8_t *type, uint8_t *payload,
 static bool split_send_frame(split_frame_type_t type, const uint8_t *payload,
                              uint8_t payload_len) {
   uint8_t frame[SPLIT_MAX_PAYLOAD_SIZE + 4];
-  uint8_t frame_len =
-      split_protocol_encode_frame(type, payload, payload_len, frame,
-                                  sizeof(frame));
+  uint8_t frame_len = split_protocol_encode_frame(type, payload, payload_len,
+                                                  frame, sizeof(frame));
   if (frame_len == 0)
     return false;
 
@@ -343,9 +337,8 @@ static void split_master_task(void) {
     return;
   }
 
-  bool got_key_state =
-      split_receive_frame(&type, payload, &payload_len,
-                          SPLIT_CONNECTION_TIMEOUT_MS);
+  bool got_key_state = split_receive_frame(&type, payload, &payload_len,
+                                           SPLIT_CONNECTION_TIMEOUT_MS);
 
   if (got_key_state && type == SPLIT_FRAME_KEY_STATE &&
       payload_len == split_key_state_payload_size(num_remote_keys)) {
@@ -358,9 +351,8 @@ static void split_master_task(void) {
 
   // Receive full analog state when requested
   if (request_analog) {
-    bool got_analog =
-        split_receive_frame(&type, payload, &payload_len,
-                            SPLIT_CONNECTION_TIMEOUT_MS);
+    bool got_analog = split_receive_frame(&type, payload, &payload_len,
+                                          SPLIT_CONNECTION_TIMEOUT_MS);
     if (got_analog && type == SPLIT_FRAME_ANALOG_STATE &&
         payload_len == split_analog_state_payload_size(num_remote_keys)) {
       split_apply_analog_state_payload(
@@ -368,6 +360,24 @@ static void split_master_task(void) {
       last_analog_sync = timer_read();
     }
   }
+
+  // Receive pointing device motion from the slave half only when the sensor
+  // is located on the slave side. Waiting for a frame that is never sent
+  // starves the USB task and can cause enumeration failures.
+#if defined(POINTING_DEVICE_ENABLED)
+  if (!POINTING_DEVICE_ON_THIS_HALF) {
+    if (split_receive_frame(&type, payload, &payload_len,
+                            SPLIT_CONNECTION_TIMEOUT_MS)) {
+      if (type == SPLIT_FRAME_POINTING &&
+          payload_len == sizeof(split_pointing_payload_t)) {
+        const split_pointing_payload_t *pointing_payload =
+            (const split_pointing_payload_t *)payload;
+        pointing_device_add_remote_delta(pointing_payload->dx,
+                                         pointing_payload->dy);
+      }
+    }
+  }
+#endif
 
   // Send layer state / control commands to slave after receiving its response
   if (layer_state_changed ||
@@ -411,8 +421,7 @@ static void split_slave_task(void) {
 
   bool request_analog = false;
   if (payload_len == sizeof(split_poll_payload_t)) {
-    const split_poll_payload_t *poll =
-        (const split_poll_payload_t *)payload;
+    const split_poll_payload_t *poll = (const split_poll_payload_t *)payload;
     request_analog = (poll->flags & SPLIT_POLL_FLAG_REQUEST_ANALOG) != 0;
   }
 
@@ -435,9 +444,29 @@ static void split_slave_task(void) {
     last_analog_sync = timer_read();
   }
 
-  // Receive any pending master frames (layer state, control commands)
-  while (split_transport_available() &&
-         split_receive_frame(&type, payload, &payload_len, 0)) {
+  // Send pointing device motion to the master half
+#if defined(POINTING_DEVICE_ENABLED)
+  if (POINTING_DEVICE_ON_THIS_HALF) {
+    int16_t dx = 0;
+    int16_t dy = 0;
+    pointing_device_get_local_delta(&dx, &dy);
+    split_pointing_payload_t pointing_payload = {
+        .dx = dx,
+        .dy = dy,
+    };
+    split_send_frame(SPLIT_FRAME_POINTING, (uint8_t *)&pointing_payload,
+                     sizeof(pointing_payload));
+  }
+#endif
+
+  // Receive any pending master frames (layer state, control commands). The
+  // master sends these immediately after the slave's key/analog response, so
+  // keep reading for a short window to avoid missing back-to-back frames.
+  const uint32_t receive_start = timer_read();
+  while (timer_elapsed(receive_start) < 2) {
+    if (!split_receive_frame(&type, payload, &payload_len, 1))
+      break;
+
     switch (type) {
     case SPLIT_FRAME_LAYER_STATE:
       if (payload_len == sizeof(split_layer_state_payload_t)) {
@@ -498,6 +527,14 @@ void split_post_init(void) {
     split_transport_master_init();
   else
     split_transport_slave_init();
+
+#if defined(SPLIT_HANDEDNESS_USB)
+  if (!is_master) {
+    // Handedness was only a placeholder during analog/matrix init; recalibrate
+    // the slave using the real local key range now that it is known.
+    matrix_recalibrate(false);
+  }
+#endif
 }
 
 void split_task(void) {

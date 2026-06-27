@@ -42,6 +42,8 @@ typedef enum {
   SPLIT_FRAME_LAYER_STATE = 0x03,
   // Master -> Slave: control command (e.g., recalibrate)
   SPLIT_FRAME_CONTROL = 0x04,
+  // Slave -> Master: pointing device motion deltas
+  SPLIT_FRAME_POINTING = 0x05,
 } split_frame_type_t;
 
 //--------------------------------------------------------------------+
@@ -94,6 +96,11 @@ typedef struct __attribute__((packed)) {
 typedef struct __attribute__((packed)) {
   uint8_t command;
 } split_control_payload_t;
+
+typedef struct __attribute__((packed)) {
+  int16_t dx;
+  int16_t dy;
+} split_pointing_payload_t;
 
 //--------------------------------------------------------------------+
 // Split Protocol API

@@ -81,6 +81,13 @@ uint32_t board_serial(char *buf);
  */
 uint32_t board_cycle_count(void);
 
+/**
+ * @brief Get the CPU clock frequency
+ *
+ * @return CPU clock frequency in Hz
+ */
+uint32_t board_clock_frequency(void);
+
 //--------------------------------------------------------------------+
 // GPIO API
 //--------------------------------------------------------------------+
@@ -114,3 +121,24 @@ void gpio_set_input_pullup(uint32_t port, uint32_t pin);
  * @return true if pin is high, false otherwise
  */
 bool gpio_read(uint32_t port, uint32_t pin);
+
+/**
+ * @brief Set a GPIO pin as push-pull output
+ *
+ * @param port Zero-based port index (0 = A, 1 = B, ...)
+ * @param pin Pin number (0-15)
+ *
+ * @return None
+ */
+void gpio_set_output(uint32_t port, uint32_t pin);
+
+/**
+ * @brief Write a GPIO output pin
+ *
+ * @param port Zero-based port index (0 = A, 1 = B, ...)
+ * @param pin Pin number (0-15)
+ * @param high true to set high, false to set low
+ *
+ * @return None
+ */
+void gpio_write(uint32_t port, uint32_t pin, bool high);

@@ -39,6 +39,24 @@
     "initial_rest_value": 2400,
     "initial_bottom_out_threshold": 650
   },
+  "pointing_device": {
+    "enabled": true,
+    "sensor": "pmw3610",
+    "side": "left",
+    "pins": {
+      "cs": "A13",
+      "sck": "A12",
+      "mosi": "PF6",
+      "miso": "PF6",
+      "irq": "PF7"
+    },
+    "cpi": 800,
+    "angle": 0,
+    "swap_xy": false,
+    "invert_x": false,
+    "invert_y": false,
+    "auto_mouse_layer": 3
+  },
   "split": {
     "enabled": true,
     "uart_instance": 1,
@@ -86,11 +104,7 @@
     }
   },
   "layout": {
-    "labels": [
-      "Split Backspace",
-      "ISO Enter",
-      "Split R-Shift"
-    ],
+    "labels": ["Split Backspace", "ISO Enter", "Split R-Shift"],
     "keymap": [
       [
         { "key": 0 },
@@ -100,76 +114,76 @@
         { "key": 4 },
         { "key": 5 },
         { "key": 6 },
-        { "key": 30, "x": 11 },
+        { "key": 30, "x": 1 },
         { "key": 31 },
         { "key": 32 },
         { "key": 33 },
         { "key": 34 },
         { "key": 35 },
-        { "key": 36, "x": 17, "w": 2, "option": [0, 0] },
-        { "key": 63, "x": 17, "option": [0, 1] },
-        { "key": 64, "x": 18, "option": [0, 1] }
+        { "key": 36, "w": 2, "option": [0, 0] },
+        { "key": 63, "option": [0, 1] },
+        { "key": 64, "option": [0, 1] }
       ],
       [
-        { "key": 7, "x": 0, "w": 1.5 },
+        { "key": 7, "w": 1.5 },
         { "key": 8 },
         { "key": 9 },
         { "key": 10 },
         { "key": 11 },
         { "key": 12 },
-        { "key": 37, "x": 11 },
+        { "key": 37, "x": 1 },
         { "key": 38 },
         { "key": 39 },
         { "key": 40 },
         { "key": 41 },
         { "key": 42 },
         { "key": 43 },
-        { "key": 44, "x": 18, "w": 1.5 }
+        { "key": 44, "w": 1.5, "option": [1, 0] },
+        { "key": 65, "x": 1, "w": 1.25, "h": 2, "w2": 1.25, "h2": 1, "x2": -0.25, "option": [1, 1] }
       ],
       [
-        { "key": 13, "x": 0, "w": 1.75 },
+        { "key": 13, "w": 1.75 },
         { "key": 14 },
         { "key": 15 },
         { "key": 16 },
         { "key": 17 },
         { "key": 18 },
-        { "key": 45, "x": 11 },
+        { "key": 45, "x": 1 },
         { "key": 46 },
         { "key": 47 },
         { "key": 48 },
         { "key": 49 },
         { "key": 50 },
-        { "key": 51, "x": 17, "w": 2.25, "option": [1, 0] },
-        { "key": 66, "x": 17, "option": [1, 1] },
-        { "key": 65, "x": 18, "w": 1.25, "h": 2, "w2": 1.25, "h2": 1, "x2": 0, "option": [1, 1] }
+        { "key": 51, "w": 2.25, "option": [1, 0] },
+        { "key": 66, "option": [1, 1] }
       ],
       [
-        { "key": 19, "x": 0, "w": 2.25 },
+        { "key": 19, "w": 2.25 },
         { "key": 20 },
         { "key": 21 },
         { "key": 22 },
         { "key": 23 },
         { "key": 24 },
-        { "key": 52, "x": 11 },
+        { "key": 52, "x": 1 },
         { "key": 53 },
         { "key": 54 },
         { "key": 55 },
         { "key": 56 },
-        { "key": 57, "x": 16, "w": 2.75, "option": [2, 0] },
-        { "key": 67, "x": 16, "w": 1.75, "option": [2, 1] },
-        { "key": 68, "x": 17.75, "option": [2, 1] }
+        { "key": 57, "w": 2.75, "option": [2, 0] },
+        { "key": 67, "w": 1.75, "option": [2, 1] },
+        { "key": 68, "option": [2, 1] }
       ],
       [
-        { "key": 25, "x": 0, "w": 1.5 },
+        { "key": 25, "w": 1.5 },
         { "key": 26 },
-        { "key": 27, "x": 2.5, "w": 1.5 },
-        { "key": 28, "x": 4 },
-        { "key": 29, "x": 5, "w": 2.25 },
-        { "key": 58, "x": 11, "w": 2.75 },
-        { "key": 59, "x": 13.75 },
-        { "key": 60, "x": 14.75, "w": 1.5 },
-        { "key": 61, "x": 16.25 },
-        { "key": 62, "x": 17.25, "w": 1.5 }
+        { "key": 27, "w": 1.5 },
+        { "key": 28 },
+        { "key": 29, "w": 2.25 },
+        { "key": 58, "x": 1, "w": 2.75 },
+        { "key": 59 },
+        { "key": 60, "w": 1.5 },
+        { "key": 61 },
+        { "key": 62, "w": 1.5 }
       ]
     ]
   },
@@ -203,8 +217,8 @@
       "KC_LCTL",
       "KC_LGUI",
       "KC_LALT",
-      "KC_NO",
-      "KC_SPC",
+      "_______",
+      "_______",
       "KC_7",
       "KC_8",
       "KC_9",
@@ -234,7 +248,7 @@
       "KC_SLSH",
       "KC_RSFT",
       "KC_SPC",
-      "KC_NO",
+      "_______",
       "KC_RGUI",
       "KC_APP",
       "KC_RCTL",

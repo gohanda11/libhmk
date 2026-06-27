@@ -22,6 +22,7 @@
 #include "hid.h"
 #include "layout.h"
 #include "matrix.h"
+#include "pointing_device.h"
 #include "split.h"
 #include "tusb.h"
 #include "wear_leveling.h"
@@ -60,6 +61,10 @@ int main(void) {
   split_post_init();
 #endif
 
+#if defined(POINTING_DEVICE_ENABLED)
+  pointing_device_init();
+#endif
+
   while (1) {
     tud_task();
 
@@ -67,6 +72,9 @@ int main(void) {
     matrix_scan();
 #if defined(SPLIT_KEYBOARD)
     split_task();
+#endif
+#if defined(POINTING_DEVICE_ENABLED)
+    pointing_device_task();
 #endif
     layout_task();
     xinput_task();
