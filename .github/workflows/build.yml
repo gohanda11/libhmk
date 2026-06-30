@@ -93,6 +93,87 @@ jobs:
             .pio/build/${{ matrix.keyboard }}/firmware.bin
             .pio/build/${{ matrix.keyboard }}/firmware.elf
 
+  publish-firmware:
+    name: Publish Firmware to firmware Branch
+    if: github.ref_name == 'split'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download Firmware Artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: firmware-*
+          path: artifacts
+
+      - name: Setup Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Checkout or Create firmware Branch
+        run: |
+          git init firmware-repo
+          cd firmware-repo
+          git remote add origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
+          git fetch origin firmware || true
+          if git rev-parse --verify origin/firmware >/dev/null 2>&1; then
+            git checkout -b firmware origin/firmware
+          else
+            git checkout --orphan firmware
+            git rm -rf . || true
+          fi
+
+      - name: Organize Firmware Files
+        run: |
+          cd firmware-repo
+          for dir in ../artifacts/firmware-*/; do
+            keyboard=$(basename "$dir" | sed 's/^firmware-//')
+            mkdir -p "$keyboard"
+            cp "$dir"firmware.bin "$keyboard/firmware.bin"
+          done
+
+      - name: Generate Manifest
+        run: |
+          cd firmware-repo
+          python3 - <<'PY'
+          import json
+          import os
+          from datetime import datetime, timezone
+
+          keyboards = []
+          for name in sorted(os.listdir('.')):
+              if os.path.isdir(name) and os.path.exists(os.path.join(name, 'firmware.bin')):
+                  size = os.path.getsize(os.path.join(name, 'firmware.bin'))
+                  keyboards.append({
+                      "keyboard": name,
+                      "url": f"https://raw.githubusercontent.com/${{ github.repository }}/firmware/{name}/firmware.bin",
+                      "size": size,
+                      "branch": "split",
+                      "commit": "${{ github.sha }}",
+                      "built_at": datetime.now(timezone.utc).isoformat()
+                  })
+
+          manifest = {
+              "repository": "${{ github.repository }}",
+              "branch": "split",
+              "commit": "${{ github.sha }}",
+              "built_at": datetime.now(timezone.utc).isoformat(),
+              "firmwares": keyboards
+          }
+
+          with open('manifest.json', 'w') as f:
+              json.dump(manifest, f, indent=2)
+          PY
+
+      - name: Commit and Push
+        run: |
+          cd firmware-repo
+          git add -A
+          git commit -m "Update firmware from split @ ${{ github.sha }}" || true
+          git push origin firmware
+
   release:
     name: Create Releast Draft
     if: github.ref_type == 'tag'
