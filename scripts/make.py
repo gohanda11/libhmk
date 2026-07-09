@@ -85,7 +85,7 @@ if kb_json.analog.delay is not None:
     build_flags.define("ADC_SAMPLE_DELAY", kb_json.analog.delay)
 
 
-def define_analog_macros(analog, suffix=""):
+def define_analog_macros(analog, suffix="", pad_width=None):
     # Raw ADC Input Configuration
     if analog.raw is not None:
         raw = analog.raw
@@ -112,9 +112,13 @@ def define_analog_macros(analog, suffix=""):
         build_flags.define(f"ADC_MUX_SELECT_PORTS{suffix}", utils.to_c_array(ports))
         build_flags.define(f"ADC_MUX_SELECT_PINS{suffix}", utils.to_c_array(pin_nums))
 
+        transposed = list(map(list, zip(*mux.matrix)))
+        if pad_width is not None:
+            for row in transposed:
+                row.extend([0] * (pad_width - len(row)))
         build_flags.define(
             f"ADC_MUX_INPUT_MATRIX{suffix}",
-            utils.to_c_array(list(map(list, zip(*mux.matrix)))),
+            utils.to_c_array(transposed),
         )
 
 
@@ -136,32 +140,62 @@ if kb_json.split is not None and kb_json.split.enabled:
             "Both split halves must either have mux analog inputs or neither"
         )
 
-    if analog_left.raw is not None:
-        if len(analog_left.raw.input) != len(analog_right.raw.input):
-            raise ValueError(
-                "Left and right raw analog input counts must match"
-            )
-        if len(analog_left.raw.vector) != len(analog_right.raw.vector):
-            raise ValueError(
-                "Left and right raw analog vector lengths must match"
-            )
-
     if analog_left.mux is not None:
-        if len(analog_left.mux.input) != len(analog_right.mux.input):
-            raise ValueError(
-                "Left and right mux analog input counts must match"
-            )
         if len(analog_left.mux.select) != len(analog_right.mux.select):
             raise ValueError(
                 "Left and right mux select pin counts must match"
             )
 
-    # For split keyboards, the unsuffixed macros describe the left half (used for
-    # buffer sizing and common counts), and the _RIGHT macros describe the right
-    # half. The driver selects between them at runtime based on handedness.
-    define_analog_macros(analog_left)
-    define_analog_macros(analog_left, "_LEFT")
-    define_analog_macros(analog_right, "_RIGHT")
+    # For split keyboards, the unsuffixed macros use the maximum left/right
+    # counts so shared buffers and matrix dimensions are sized for either half.
+    # The suffixed macros keep each half's actual count, but matrices are padded
+    # to the maximum width so the C array type is consistent.
+    max_mux_inputs = 0
+    max_raw_inputs = 0
+    if analog_left.mux is not None:
+        max_mux_inputs = max(
+            len(analog_left.mux.input), len(analog_right.mux.input)
+        )
+    if analog_left.raw is not None:
+        max_raw_inputs = max(
+            len(analog_left.raw.input), len(analog_right.raw.input)
+        )
+
+    # Define base macros from the left half, with maximum counts and padded
+    # matrices, so non-half-specific code has a stable sizing type.
+    if analog_left.mux is not None:
+        mux = analog_left.mux
+        build_flags.define("ADC_NUM_MUX_INPUTS", max_mux_inputs)
+        build_flags.define(
+            "ADC_MUX_INPUT_CHANNELS",
+            utils.to_c_array(driver.metadata.adc.to_adc_inputs(mux.input)),
+        )
+        build_flags.define("ADC_NUM_MUX_SELECT_PINS", len(mux.select))
+        ports, pin_nums = driver.metadata.adc.to_gpio_array(mux.select)
+        build_flags.define("ADC_MUX_SELECT_PORTS", utils.to_c_array(ports))
+        build_flags.define("ADC_MUX_SELECT_PINS", utils.to_c_array(pin_nums))
+        transposed = list(map(list, zip(*mux.matrix)))
+        for row in transposed:
+            row.extend([0] * (max_mux_inputs - len(row)))
+        build_flags.define(
+            "ADC_MUX_INPUT_MATRIX",
+            utils.to_c_array(transposed),
+        )
+
+    if analog_left.raw is not None:
+        raw = analog_left.raw
+        build_flags.define("ADC_NUM_RAW_INPUTS", max_raw_inputs)
+        build_flags.define(
+            "ADC_RAW_INPUT_CHANNELS",
+            utils.to_c_array(driver.metadata.adc.to_adc_inputs(raw.input)),
+        )
+        build_flags.define(
+            "ADC_RAW_INPUT_VECTOR", utils.to_c_array(raw.vector)
+        )
+
+    # Define per-half macros with padded matrices.
+    define_analog_macros(analog_left, "_LEFT", pad_width=max_mux_inputs)
+    define_analog_macros(analog_right, "_RIGHT", pad_width=max_mux_inputs)
 else:
     # Generate the base analog macros used by non-split keyboards.
     define_analog_macros(kb_json.analog)

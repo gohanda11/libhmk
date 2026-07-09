@@ -29,6 +29,13 @@
 #define ADC_NUM_MUX_INPUTS 0
 #endif
 
+#if !defined(ADC_NUM_MUX_INPUTS_LEFT)
+#define ADC_NUM_MUX_INPUTS_LEFT ADC_NUM_MUX_INPUTS
+#endif
+#if !defined(ADC_NUM_MUX_INPUTS_RIGHT)
+#define ADC_NUM_MUX_INPUTS_RIGHT ADC_NUM_MUX_INPUTS
+#endif
+
 #if ADC_NUM_MUX_INPUTS > 0
 #if !defined(ADC_MUX_INPUT_CHANNELS)
 #error "ADC_MUX_INPUT_CHANNELS is not defined"
@@ -62,6 +69,13 @@ _Static_assert((F_CPU / 1000000) * ADC_SAMPLE_DELAY < 65536,
 #if !defined(ADC_NUM_RAW_INPUTS)
 // Number of ADC inputs that are connected directly to the keys
 #define ADC_NUM_RAW_INPUTS 0
+#endif
+
+#if !defined(ADC_NUM_RAW_INPUTS_LEFT)
+#define ADC_NUM_RAW_INPUTS_LEFT ADC_NUM_RAW_INPUTS
+#endif
+#if !defined(ADC_NUM_RAW_INPUTS_RIGHT)
+#define ADC_NUM_RAW_INPUTS_RIGHT ADC_NUM_RAW_INPUTS
 #endif
 
 #if ADC_NUM_RAW_INPUTS > 0

@@ -48,9 +48,9 @@ _Static_assert(M_ARRAY_SIZE(channel_pins) == ADC_NUM_CHANNELS,
 static const uint8_t mux_input_channels_left[] = ADC_MUX_INPUT_CHANNELS_LEFT;
 static const uint8_t mux_input_channels_right[] = ADC_MUX_INPUT_CHANNELS_RIGHT;
 
-_Static_assert(M_ARRAY_SIZE(mux_input_channels_left) == ADC_NUM_MUX_INPUTS,
+_Static_assert(M_ARRAY_SIZE(mux_input_channels_left) == ADC_NUM_MUX_INPUTS_LEFT,
                "Invalid number of left ADC multiplexer inputs");
-_Static_assert(M_ARRAY_SIZE(mux_input_channels_right) == ADC_NUM_MUX_INPUTS,
+_Static_assert(M_ARRAY_SIZE(mux_input_channels_right) == ADC_NUM_MUX_INPUTS_RIGHT,
                "Invalid number of right ADC multiplexer inputs");
 
 static gpio_type *mux_select_ports_left[] = ADC_MUX_SELECT_PORTS_LEFT;
@@ -91,17 +91,17 @@ static const uint16_t (*mux_input_matrix)[ADC_NUM_MUX_INPUTS];
 static const uint8_t raw_input_channels_left[] = ADC_RAW_INPUT_CHANNELS_LEFT;
 static const uint8_t raw_input_channels_right[] = ADC_RAW_INPUT_CHANNELS_RIGHT;
 
-_Static_assert(M_ARRAY_SIZE(raw_input_channels_left) == ADC_NUM_RAW_INPUTS,
+_Static_assert(M_ARRAY_SIZE(raw_input_channels_left) == ADC_NUM_RAW_INPUTS_LEFT,
                "Invalid number of left ADC raw inputs");
-_Static_assert(M_ARRAY_SIZE(raw_input_channels_right) == ADC_NUM_RAW_INPUTS,
+_Static_assert(M_ARRAY_SIZE(raw_input_channels_right) == ADC_NUM_RAW_INPUTS_RIGHT,
                "Invalid number of right ADC raw inputs");
 
 static const uint16_t raw_input_vector_left[] = ADC_RAW_INPUT_VECTOR_LEFT;
 static const uint16_t raw_input_vector_right[] = ADC_RAW_INPUT_VECTOR_RIGHT;
 
-_Static_assert(M_ARRAY_SIZE(raw_input_vector_left) == ADC_NUM_RAW_INPUTS,
+_Static_assert(M_ARRAY_SIZE(raw_input_vector_left) == ADC_NUM_RAW_INPUTS_LEFT,
                "Invalid number of left ADC raw inputs");
-_Static_assert(M_ARRAY_SIZE(raw_input_vector_right) == ADC_NUM_RAW_INPUTS,
+_Static_assert(M_ARRAY_SIZE(raw_input_vector_right) == ADC_NUM_RAW_INPUTS_RIGHT,
                "Invalid number of right ADC raw inputs");
 
 static const uint8_t *raw_input_channels;
@@ -167,11 +167,19 @@ __attribute__((aligned(8))) static volatile uint16_t
     adc_buffer[ADC_NUM_MUX_INPUTS + ADC_NUM_RAW_INPUTS];
 // ADC values for each key
 static volatile uint16_t adc_values[NUM_KEYS];
+// Active ADC input counts for the current half (may differ from the max macros)
+static uint8_t num_mux_inputs;
+static uint8_t num_raw_inputs;
 
 void analog_init(void) {
 #if defined(SPLIT_KEYBOARD)
-  // Select the analog configuration tables for this half before initializing
-  // the ADC peripheral.
+  // Select the active input counts and analog configuration tables for this
+  // half before initializing the ADC peripheral.
+  num_mux_inputs =
+      split_is_left() ? ADC_NUM_MUX_INPUTS_LEFT : ADC_NUM_MUX_INPUTS_RIGHT;
+  num_raw_inputs =
+      split_is_left() ? ADC_NUM_RAW_INPUTS_LEFT : ADC_NUM_RAW_INPUTS_RIGHT;
+
 #if ADC_NUM_MUX_INPUTS > 0
   mux_input_channels =
       split_is_left() ? mux_input_channels_left : mux_input_channels_right;
@@ -188,6 +196,9 @@ void analog_init(void) {
   raw_input_vector =
       split_is_left() ? raw_input_vector_left : raw_input_vector_right;
 #endif
+#else
+  num_mux_inputs = ADC_NUM_MUX_INPUTS;
+  num_raw_inputs = ADC_NUM_RAW_INPUTS;
 #endif
 
   // Enable peripheral clocks
@@ -208,12 +219,12 @@ void analog_init(void) {
   adc_base_struct.repeat_mode = FALSE;
   adc_base_struct.data_align = ADC_RIGHT_ALIGNMENT;
   adc_base_struct.ordinary_channel_length =
-      ADC_NUM_MUX_INPUTS + ADC_NUM_RAW_INPUTS;
+      num_mux_inputs + num_raw_inputs;
   adc_base_config(ADC1, &adc_base_struct);
 
 #if ADC_NUM_MUX_INPUTS > 0
   // Initialize the multiplexer input channels
-  for (uint32_t i = 0; i < ADC_NUM_MUX_INPUTS; i++) {
+  for (uint32_t i = 0; i < num_mux_inputs; i++) {
     adc_ordinary_channel_set(ADC1,
                              (adc_channel_select_type)mux_input_channels[i],
                              i + 1, ADC_NUM_SAMPLE_CYCLES);
@@ -239,10 +250,10 @@ void analog_init(void) {
 
 #if ADC_NUM_RAW_INPUTS > 0
   // Initialize the raw input channels
-  for (uint32_t i = 0; i < ADC_NUM_RAW_INPUTS; i++) {
+  for (uint32_t i = 0; i < num_raw_inputs; i++) {
     adc_ordinary_channel_set(ADC1,
                              (adc_channel_select_type)raw_input_channels[i],
-                             ADC_NUM_MUX_INPUTS + i + 1, ADC_NUM_SAMPLE_CYCLES);
+                             num_mux_inputs + i + 1, ADC_NUM_SAMPLE_CYCLES);
 
     gpio_default_para_init(&gpio_init_struct);
     gpio_init_struct.gpio_pins = channel_pins[raw_input_channels[i]];
@@ -258,7 +269,7 @@ void analog_init(void) {
   // Initialize the DMA peripheral
   dma_reset(DMA1_CHANNEL1);
   dma_default_para_init(&dma_init_struct);
-  dma_init_struct.buffer_size = ADC_NUM_MUX_INPUTS + ADC_NUM_RAW_INPUTS;
+  dma_init_struct.buffer_size = num_mux_inputs + num_raw_inputs;
   dma_init_struct.direction = DMA_DIR_PERIPHERAL_TO_MEMORY;
   dma_init_struct.memory_base_addr = (uint32_t)adc_buffer;
   dma_init_struct.memory_data_width = DMA_MEMORY_DATA_WIDTH_HALFWORD;
@@ -332,6 +343,24 @@ void analog_reconfigure_handedness(bool is_left) {
       is_left ? raw_input_channels_left : raw_input_channels_right;
   raw_input_vector = is_left ? raw_input_vector_left : raw_input_vector_right;
 #endif
+
+  uint8_t new_num_mux_inputs =
+      is_left ? ADC_NUM_MUX_INPUTS_LEFT : ADC_NUM_MUX_INPUTS_RIGHT;
+  uint8_t new_num_raw_inputs =
+      is_left ? ADC_NUM_RAW_INPUTS_LEFT : ADC_NUM_RAW_INPUTS_RIGHT;
+
+  if (new_num_mux_inputs != num_mux_inputs ||
+      new_num_raw_inputs != num_raw_inputs) {
+    num_mux_inputs = new_num_mux_inputs;
+    num_raw_inputs = new_num_raw_inputs;
+
+    adc_base_struct.ordinary_channel_length =
+        num_mux_inputs + num_raw_inputs;
+    adc_base_config(ADC1, &adc_base_struct);
+
+    dma_init_struct.buffer_size = num_mux_inputs + num_raw_inputs;
+    dma_init(DMA1_CHANNEL1, &dma_init_struct);
+  }
 }
 #endif // defined(SPLIT_KEYBOARD)
 
@@ -349,7 +378,7 @@ void DMA1_Channel1_IRQHandler(void) {
     dma_flag_clear(DMA1_FDT1_FLAG);
 
 #if ADC_NUM_MUX_INPUTS > 0
-    for (uint32_t i = 0; i < ADC_NUM_MUX_INPUTS; i++) {
+    for (uint32_t i = 0; i < num_mux_inputs; i++) {
       const uint16_t key = mux_input_matrix[current_mux_channel][i];
       if (key)
         adc_values[split_get_key_offset() + key - 1] = adc_buffer[i];
@@ -357,11 +386,11 @@ void DMA1_Channel1_IRQHandler(void) {
 #endif
 
 #if ADC_NUM_RAW_INPUTS > 0
-    for (uint32_t i = 0; i < ADC_NUM_RAW_INPUTS; i++) {
+    for (uint32_t i = 0; i < num_raw_inputs; i++) {
       const uint16_t key = raw_input_vector[i];
       if (key)
         adc_values[split_get_key_offset() + key - 1] =
-            adc_buffer[ADC_NUM_MUX_INPUTS + i];
+            adc_buffer[num_mux_inputs + i];
     }
 #endif
 
