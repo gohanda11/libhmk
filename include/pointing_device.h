@@ -76,6 +76,7 @@ void pointing_device_task(void);
  * @return None
  */
 void pointing_device_get_local_delta(int16_t *dx, int16_t *dy);
+void pointing_device_restore_local_delta(int16_t dx, int16_t dy);
 
 /**
  * @brief Add motion received from the remote half

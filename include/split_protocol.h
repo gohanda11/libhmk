@@ -53,6 +53,10 @@ typedef enum {
 typedef enum {
   // Request the slave to send a full analog state frame after key state
   SPLIT_POLL_FLAG_REQUEST_ANALOG = 0x01,
+  // Master will send a layer-state frame after the slave response
+  SPLIT_POLL_FLAG_FOLLOWUP_LAYER = 0x02,
+  // Master will send a control frame after the slave response
+  SPLIT_POLL_FLAG_FOLLOWUP_CONTROL = 0x04,
 } split_poll_flags_t;
 
 //--------------------------------------------------------------------+
@@ -80,9 +84,11 @@ typedef struct __attribute__((packed)) {
 // Split Payload Structures
 //--------------------------------------------------------------------+
 
-// Key state payload: bitmap + distance array for local keys
-// Bitmap size = ceil(SPLIT_NUM_KEYS_LOCAL / 8)
-// Distance array size = SPLIT_NUM_KEYS_LOCAL
+// Key/analog payloads are defined in src/split.c and are always sized to
+// SPLIT_NUM_KEYS_LOCAL_MAX so asymmetric halves (e.g. 30 vs 39) keep a stable
+// on-wire layout. The pressed bitmap uses 32-bit bitmap_t words:
+//   bitmap words = ceil(SPLIT_NUM_KEYS_LOCAL_MAX / 32)
+//   distance[SPLIT_NUM_KEYS_LOCAL_MAX]
 
 typedef struct __attribute__((packed)) {
   uint8_t flags;

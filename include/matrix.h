@@ -109,6 +109,19 @@ void matrix_recalibrate(bool reset_bottom_out_threshold);
 void matrix_scan(void);
 
 /**
+ * @brief Update press state from a travel distance
+ *
+ * Used for local scans and by the split master to evaluate remote travel
+ * distances against the USB-connected half's authoritative actuation profile.
+ *
+ * @param key Key index
+ * @param distance Travel distance in the range [0, 255]
+ *
+ * @return None
+ */
+void matrix_update_press_state(uint8_t key, uint8_t distance);
+
+/**
  * @brief Disable Rapid Trigger of a key
  *
  * This function is used by the advanced keys that override the Rapid Trigger

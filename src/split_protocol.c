@@ -37,6 +37,8 @@ uint8_t split_protocol_crc8(const uint8_t *data, uint8_t len) {
 uint8_t split_protocol_encode_frame(split_frame_type_t type,
                                     const uint8_t *payload, uint8_t payload_len,
                                     uint8_t *out_buf, uint8_t out_len) {
+  if (payload_len > SPLIT_MAX_PAYLOAD_SIZE)
+    return 0;
   if (out_len < payload_len + 4)
     return 0;
 

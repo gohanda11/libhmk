@@ -121,6 +121,11 @@ void pointing_device_get_local_delta(int16_t *dx, int16_t *dy) {
   local_dy = 0;
 }
 
+void pointing_device_restore_local_delta(int16_t dx, int16_t dy) {
+  local_dx += dx;
+  local_dy += dy;
+}
+
 void pointing_device_add_remote_delta(int16_t dx, int16_t dy) {
   remote_dx += dx;
   remote_dy += dy;

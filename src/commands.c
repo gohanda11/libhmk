@@ -63,10 +63,13 @@ void command_process(const uint8_t *buf) {
   }
   case COMMAND_RECALIBRATE: {
 #if defined(SPLIT_KEYBOARD)
-    // Propagate recalibrate command to the slave half
+    // Queue + flush one transaction before the local 500ms block, otherwise the
+    // control frame sits pending until after master recalibration.
     split_send_control_command(SPLIT_CONTROL_RECALIBRATE);
+    split_flush();
 #endif
-    matrix_recalibrate(true);
+    // Preserve learned bottom-out thresholds; only retake rest values.
+    matrix_recalibrate(false);
     break;
   }
   case COMMAND_ANALOG_INFO: {
@@ -159,12 +162,24 @@ void command_process(const uint8_t *buf) {
   case COMMAND_SAVE_CALIBRATION_THRESHOLD: {
     uint16_t bottom_out_threshold[NUM_KEYS];
 
+    // Preserve any previously stored remote-half values on split keyboards.
+    // The master never observes true rest/bottom-out for remote keys, so
+    // overwriting them from local matrix state would corrupt calibration.
+#if defined(SPLIT_KEYBOARD)
+    for (uint32_t i = 0; i < NUM_KEYS; i++)
+      bottom_out_threshold[i] = eeconfig->bottom_out_threshold[i];
+
+    for (uint32_t i = 0; i < split_get_num_local_keys(); i++) {
+      const uint32_t key = (uint32_t)split_get_key_offset() + i;
+#else
     for (uint32_t i = 0; i < NUM_KEYS; i++) {
-      if (key_matrix[i].adc_bottom_out_value < key_matrix[i].adc_rest_value)
-        bottom_out_threshold[i] = 0;
+      const uint32_t key = i;
+#endif
+      if (key_matrix[key].adc_bottom_out_value < key_matrix[key].adc_rest_value)
+        bottom_out_threshold[key] = 0;
       else
-        bottom_out_threshold[i] =
-            key_matrix[i].adc_bottom_out_value - key_matrix[i].adc_rest_value;
+        bottom_out_threshold[key] = key_matrix[key].adc_bottom_out_value -
+                                    key_matrix[key].adc_rest_value;
     }
     success = EECONFIG_WRITE(bottom_out_threshold, bottom_out_threshold);
     break;

@@ -165,7 +165,26 @@ bool split_is_connected(void);
  */
 bool split_send_control_command(uint8_t command);
 
+/**
+ * @brief Force one master split transaction
+ *
+ * Used to deliver a pending control/layer frame before the caller blocks.
+ *
+ * @return None
+ */
+void split_flush(void);
+
+/**
+ * @brief Idle hook for blocking calibration windows
+ *
+ * Drains split UART RX once the transport is initialized so post-init
+ * recalibration cannot leave sticky overrun errors.
+ */
+void split_calibration_idle(void);
+
 #else // defined(SPLIT_KEYBOARD)
+
+static inline void split_calibration_idle(void) {}
 
 static inline uint8_t split_get_key_offset(void) { return 0; }
 
