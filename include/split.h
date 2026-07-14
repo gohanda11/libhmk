@@ -77,8 +77,9 @@ void split_pre_init(void);
 /**
  * @brief Post-initialize the split keyboard module
  *
- * This must be called after tud_init(). It performs master/slave detection
- * based on USB connection state and initializes the transport layer.
+ * This must be called after tud_init(). It initializes the transport layer as
+ * a slave so the link is ready immediately, and promotes to master once USB
+ * connection is observed.
  *
  * @return None
  */
@@ -87,8 +88,9 @@ void split_post_init(void);
 /**
  * @brief Split keyboard task
  *
- * This should be called in the main loop. On the master side, it receives key
- * states from the slave. On the slave side, it sends key states to the master.
+ * This should be called in the main loop. It promotes a slave to master when
+ * USB is detected. On the master side, it receives key states from the slave.
+ * On the slave side, it sends key states to the master.
  *
  * @return None
  */

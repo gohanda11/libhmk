@@ -59,16 +59,6 @@
 #define SPLIT_LAYER_SYNC_INTERVAL_MS 50
 #endif
 
-#if !defined(SPLIT_USB_DETECT_TIMEOUT_MS)
-// Timeout for detecting USB connection during master/slave determination
-#define SPLIT_USB_DETECT_TIMEOUT_MS 2000
-#endif
-
-#if !defined(SPLIT_USB_DETECT_POLL_MS)
-// Poll interval for USB connection detection
-#define SPLIT_USB_DETECT_POLL_MS 10
-#endif
-
 //--------------------------------------------------------------------+
 // Local Types
 //--------------------------------------------------------------------+
@@ -116,20 +106,37 @@ static uint32_t poll_pause_ms;
 static bool transport_initialized;
 
 //--------------------------------------------------------------------+
-// Master/Slave Detection
+// Master/Slave Promotion
 //--------------------------------------------------------------------+
 
-static bool split_detect_master(void) {
-  // Wait for USB connection to be established. The half that enumerates is the
-  // master. We must run tud_task() so that TinyUSB can process bus events.
-  const uint32_t start = timer_read();
-  while (timer_elapsed(start) < SPLIT_USB_DETECT_TIMEOUT_MS) {
-    tud_task();
-    if (tud_mounted() || tud_connected())
-      return true;
-    timer_delay(SPLIT_USB_DETECT_POLL_MS);
-  }
-  return false;
+static bool split_usb_active(void) {
+  return tud_mounted() || tud_connected();
+}
+
+static void split_promote_to_master(void) {
+  is_master = true;
+
+#if defined(SPLIT_HANDEDNESS_USB)
+  // The half that enumerates over USB is always treated as the left half.
+  split_set_handedness(true);
+  analog_reconfigure_handedness(true);
+#endif
+
+  split_transport_master_init();
+  split_transport_clear();
+
+  connected = false;
+  connection_errors = 0;
+  last_poll_time = 0;
+  poll_pause_start = 0;
+  poll_pause_ms = 0;
+  analog_state_valid = false;
+  pending_control_command = 0;
+  slave_recalibrate_pending = false;
+  local_layer_mask = 0;
+  local_default_layer = 0;
+  layer_state_changed = false;
+  last_analog_sync = timer_read();
 }
 
 //--------------------------------------------------------------------+
@@ -636,7 +643,8 @@ void split_pre_init(void) {
   // use the correct global key offset for this half.
   split_set_handedness(split_detect_left());
 
-  // Master/slave will be determined in split_post_init() after USB init.
+  // Start as slave; promotion to master happens in split_task() once USB is
+  // detected.
   is_master = false;
   connected = false;
   connection_errors = 0;
@@ -658,33 +666,32 @@ void split_pre_init(void) {
 }
 
 void split_post_init(void) {
-  is_master = split_detect_master();
-
-#if defined(SPLIT_HANDEDNESS_USB)
-  // The half that enumerates over USB is always treated as the left half.
-  split_set_handedness(is_master);
-  analog_reconfigure_handedness(is_master);
-#endif
-
-  if (is_master)
-    split_transport_master_init();
-  else
-    split_transport_slave_init();
+  // Start as slave so the UART is immediately ready to receive polls even
+  // when USB has not enumerated yet. Promote to master as soon as USB activity
+  // is observed in split_task().
+  split_transport_slave_init();
   transport_initialized = true;
 
-  // matrix_init() calibrates before USB master/slave detection. The slave half
-  // then waits up to SPLIT_USB_DETECT_TIMEOUT_MS without USB power regulation,
-  // so its early rest values are often too high and create a dead zone at the
-  // start of travel. Recalibrate both halves now that power has settled.
+  // matrix_init() calibrates before the role is finalized. Recalibrate both
+  // halves now that power has settled.
   matrix_recalibrate(false);
 
   // Start the link with compact KEY_STATE polls only. Analog can wait until
   // the half-duplex exchange has proven stable.
   last_analog_sync = timer_read();
   split_transport_clear();
+
+  // If USB is already enumerated at startup, promote immediately.
+  if (split_usb_active())
+    split_promote_to_master();
 }
 
 void split_task(void) {
+  if (!is_master && split_usb_active()) {
+    split_promote_to_master();
+    return;
+  }
+
   if (is_master)
     split_master_task();
   else
