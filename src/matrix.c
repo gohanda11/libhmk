@@ -50,6 +50,53 @@ key_state_t key_matrix[NUM_KEYS];
 // Bitmap for tracking which keys have Rapid Trigger disabled
 static bitmap_t rapid_trigger_disabled[] = MAKE_BITMAP(NUM_KEYS);
 
+//--------------------------------------------------------------------+
+// Travel Distance AGC
+//--------------------------------------------------------------------+
+// Compensates for reduced ADC swing on a voltage-sagged split half (e.g. when
+// the slave is powered only through a 3.3V/GND/DATA tether). Peak travel is
+// tracked per key and used to stretch distance toward the full 0-255 range.
+// On a healthy half the peak quickly reaches 255 and scaling becomes a no-op.
+
+#if !defined(MATRIX_DISTANCE_AGC_MIN_PEAK)
+// Do not engage scaling until a key has traveled at least this far. Prevents
+// soft taps from permanently over-amplifying subsequent presses.
+#define MATRIX_DISTANCE_AGC_MIN_PEAK 96
+#endif
+
+#if !defined(MATRIX_DISTANCE_AGC_DECAY_MS)
+// Slowly forget peaks so a stale low peak (or recovering supply) can relearn.
+#define MATRIX_DISTANCE_AGC_DECAY_MS 2000
+#endif
+
+static uint8_t distance_peak[NUM_KEYS];
+static uint32_t distance_agc_decay_timer;
+
+static uint8_t matrix_apply_distance_agc(uint8_t key, uint8_t distance) {
+  if (distance > distance_peak[key])
+    distance_peak[key] = distance;
+
+  const uint8_t peak = distance_peak[key];
+  if (peak < MATRIX_DISTANCE_AGC_MIN_PEAK || peak >= 255)
+    return distance;
+
+  // distance <= peak, so the scaled value fits in uint8_t.
+  return (uint8_t)((uint16_t)distance * 255u / peak);
+}
+
+static void matrix_distance_agc_decay(void) {
+  if (timer_elapsed(distance_agc_decay_timer) < MATRIX_DISTANCE_AGC_DECAY_MS)
+    return;
+  distance_agc_decay_timer = timer_read();
+
+  for (uint32_t i = 0; i < NUM_KEYS; i++) {
+    if (key_matrix[i].is_pressed)
+      continue;
+    if (distance_peak[i] > 0)
+      distance_peak[i]--;
+  }
+}
+
 void matrix_init(void) { matrix_recalibrate(false); }
 
 void matrix_recalibrate(bool reset_bottom_out_threshold) {
@@ -67,7 +114,9 @@ void matrix_recalibrate(bool reset_bottom_out_threshold) {
     key_matrix[i].extremum = 0;
     key_matrix[i].key_dir = KEY_DIR_INACTIVE;
     key_matrix[i].is_pressed = false;
+    distance_peak[i] = 0;
   }
+  distance_agc_decay_timer = timer_read();
 
   // We only calibrate the rest value. The bottom-out value will be updated
   // during the scan process.
@@ -198,10 +247,11 @@ static void matrix_scan_key(uint32_t i) {
     // difference is at least the calibration epsilon.
     key_matrix[i].adc_bottom_out_value = new_adc_filtered;
 
-  matrix_update_press_state(
-      (uint8_t)i,
-      adc_to_distance(new_adc_filtered, key_matrix[i].adc_rest_value,
-                      key_matrix[i].adc_bottom_out_value));
+  const uint8_t raw_distance = adc_to_distance(
+      new_adc_filtered, key_matrix[i].adc_rest_value,
+      key_matrix[i].adc_bottom_out_value);
+  matrix_update_press_state((uint8_t)i,
+                            matrix_apply_distance_agc((uint8_t)i, raw_distance));
 }
 
 void matrix_scan(void) {
@@ -214,6 +264,7 @@ void matrix_scan(void) {
   for (uint32_t i = 0; i < NUM_KEYS; i++)
     matrix_scan_key(i);
 #endif
+  matrix_distance_agc_decay();
 }
 
 void matrix_disable_rapid_trigger(uint8_t key, bool disable) {

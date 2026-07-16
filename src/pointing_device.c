@@ -88,10 +88,6 @@ void pointing_device_task(void) {
     if (pmw3610_read_motion(&dx, &dy)) {
       local_dx += dx;
       local_dy += dy;
-
-#if defined(POINTING_DEVICE_AUTO_MOUSE_LAYER)
-      layout_set_auto_mouse_layer(POINTING_DEVICE_AUTO_MOUSE_LAYER);
-#endif
     }
   }
 
@@ -103,6 +99,12 @@ void pointing_device_task(void) {
     local_dy = 0;
     remote_dx = 0;
     remote_dy = 0;
+#if defined(POINTING_DEVICE_AUTO_MOUSE_LAYER)
+    // Enable AML from the USB master's combined motion so slave-side sensor
+    // movement reaches the half that owns layer state / HID.
+    if (total_dx != 0 || total_dy != 0)
+      layout_set_auto_mouse_layer(POINTING_DEVICE_AUTO_MOUSE_LAYER);
+#endif
     pointing_device_send_hid(total_dx, total_dy);
   }
 #else
@@ -110,6 +112,10 @@ void pointing_device_task(void) {
   const int16_t total_dy = local_dy;
   local_dx = 0;
   local_dy = 0;
+#if defined(POINTING_DEVICE_AUTO_MOUSE_LAYER)
+  if (total_dx != 0 || total_dy != 0)
+    layout_set_auto_mouse_layer(POINTING_DEVICE_AUTO_MOUSE_LAYER);
+#endif
   pointing_device_send_hid(total_dx, total_dy);
 #endif
 }

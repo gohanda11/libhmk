@@ -11,3 +11,6 @@ AGENTS.md
 
 # Metadata header file
 include/metadata.h
+
+# Local/test scripts (not part of firmware)
+tools/

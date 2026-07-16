@@ -422,12 +422,25 @@ static void split_master_task(void) {
       request_analog ? (SPLIT_CONNECTION_TIMEOUT_MS + 5)
                      : SPLIT_CONNECTION_TIMEOUT_MS;
 
+  // Buffer slave payloads and apply them only after the full response has been
+  // received. Applying KEY_STATE for up to 39 keys is slow enough that the
+  // AT32 USART's 1-byte RX FIFO overflows and drops a following POINTING frame.
+  split_key_state_payload_t pending_key_state;
+  bool have_key_state = false;
+  split_analog_state_payload_t pending_analog_state;
+  bool have_analog_state = false;
+#if defined(POINTING_DEVICE_ENABLED)
+  split_pointing_payload_t pending_pointing;
+  bool have_pointing = false;
+#endif
+
   bool got_key_state = split_receive_frame(&type, payload, &payload_len,
                                            response_timeout);
 
   if (got_key_state && type == SPLIT_FRAME_KEY_STATE &&
       payload_len == split_key_state_payload_size()) {
-    split_apply_key_state_payload((const split_key_state_payload_t *)payload);
+    memcpy(&pending_key_state, payload, sizeof(pending_key_state));
+    have_key_state = true;
     split_update_connection(true);
   } else {
     split_transport_clear();
@@ -447,21 +460,19 @@ static void split_master_task(void) {
     last_analog_sync = timer_read();
     if (got_analog && type == SPLIT_FRAME_ANALOG_STATE &&
         payload_len == split_analog_state_payload_size()) {
-      split_apply_analog_state_payload(
-          (const split_analog_state_payload_t *)payload);
+      memcpy(&pending_analog_state, payload, sizeof(pending_analog_state));
+      have_analog_state = true;
     } else if (got_analog && type == SPLIT_FRAME_POINTING &&
                payload_len == sizeof(split_pointing_payload_t)) {
       // Analog was lost/skipped; still consume pointing so the exchange stays
       // aligned and we do not falsely mark the link unhealthy.
 #if defined(POINTING_DEVICE_ENABLED)
       if (!POINTING_DEVICE_ON_THIS_HALF) {
-        const split_pointing_payload_t *pointing_payload =
-            (const split_pointing_payload_t *)payload;
-        pointing_device_add_remote_delta(pointing_payload->dx,
-                                         pointing_payload->dy);
+        memcpy(&pending_pointing, payload, sizeof(pending_pointing));
+        have_pointing = true;
       }
 #endif
-      goto followup;
+      goto apply_frames;
     }
   }
 
@@ -473,12 +484,20 @@ static void split_master_task(void) {
                             SPLIT_CONNECTION_TIMEOUT_MS) &&
         type == SPLIT_FRAME_POINTING &&
         payload_len == sizeof(split_pointing_payload_t)) {
-      const split_pointing_payload_t *pointing_payload =
-          (const split_pointing_payload_t *)payload;
-      pointing_device_add_remote_delta(pointing_payload->dx,
-                                       pointing_payload->dy);
+      memcpy(&pending_pointing, payload, sizeof(pending_pointing));
+      have_pointing = true;
     }
   }
+#endif
+
+apply_frames:
+  if (have_key_state)
+    split_apply_key_state_payload(&pending_key_state);
+  if (have_analog_state)
+    split_apply_analog_state_payload(&pending_analog_state);
+#if defined(POINTING_DEVICE_ENABLED)
+  if (have_pointing)
+    pointing_device_add_remote_delta(pending_pointing.dx, pending_pointing.dy);
 #endif
 
 followup:

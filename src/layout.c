@@ -38,6 +38,9 @@ static uint8_t default_layer;
 static uint8_t auto_mouse_layer;
 static uint32_t auto_mouse_timeout;
 static bool auto_mouse_active;
+// True when AML turned the layer on itself (layer was off at activation).
+// Prevents clearing a layer that was already held by MO/TG before AML.
+static bool auto_mouse_clear_on_timeout;
 #endif
 
 /**
@@ -50,19 +53,7 @@ static bool auto_mouse_active;
  */
 __attribute__((always_inline)) static inline uint8_t
 layout_get_current_layer(void) {
-  uint16_t effective_layer_mask = layer_mask;
-
-#if defined(POINTING_DEVICE_AUTO_MOUSE_LAYER)
-  if (auto_mouse_active) {
-    if (timer_elapsed(auto_mouse_timeout) >= AUTO_MOUSE_TIMEOUT_MS)
-      auto_mouse_active = false;
-    else
-      effective_layer_mask |= (uint16_t)(1 << auto_mouse_layer);
-  }
-#endif
-
-  return effective_layer_mask ? 31 - __builtin_clz(effective_layer_mask)
-                              : default_layer;
+  return layer_mask ? 31 - __builtin_clz(layer_mask) : default_layer;
 }
 
 __attribute__((always_inline)) static inline void
@@ -154,6 +145,18 @@ void layout_load_advanced_keys(void) {
 void layout_task(void) {
   static advanced_key_event_t ak_event = {0};
   static uint32_t last_ak_tick = 0;
+
+#if defined(POINTING_DEVICE_AUTO_MOUSE_LAYER)
+  // Expire AML via real layer_mask bits so layout_get_keycode() and split
+  // layer sync both observe the auto-mouse layer.
+  if (auto_mouse_active &&
+      timer_elapsed(auto_mouse_timeout) >= AUTO_MOUSE_TIMEOUT_MS) {
+    if (auto_mouse_clear_on_timeout)
+      layout_layer_off(auto_mouse_layer);
+    auto_mouse_active = false;
+    auto_mouse_clear_on_timeout = false;
+  }
+#endif
 
   uint8_t current_layer = layout_get_current_layer();
   bool has_non_tap_hold_press = false;
@@ -390,6 +393,13 @@ void layout_unregister(uint8_t key, uint8_t keycode) {
 void layout_set_auto_mouse_layer(uint8_t layer) {
   auto_mouse_layer = layer;
   auto_mouse_timeout = timer_read();
-  auto_mouse_active = true;
+  if (!auto_mouse_active) {
+    auto_mouse_clear_on_timeout = ((layer_mask & (uint16_t)(1u << layer)) == 0);
+    layout_layer_on(layer);
+    auto_mouse_active = true;
+  } else {
+    // Refresh timeout; keep the real layer bit asserted.
+    layout_layer_on(layer);
+  }
 }
 #endif
