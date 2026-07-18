@@ -1,64 +1,64 @@
 {
   "repository": "gohanda11/libhmk",
   "branch": "split",
-  "commit": "36cd7eb97077a4f3accaec20b2c620a886037c7d",
-  "built_at": "2026-07-16T14:21:57.926497+00:00",
+  "commit": "874b7c5e379b45e9f6664e5adec5ba7b59f676e7",
+  "built_at": "2026-07-18T03:47:29.454874+00:00",
   "firmwares": [
     {
       "keyboard": "chai45he",
       "url": "https://raw.githubusercontent.com/gohanda11/libhmk/firmware/chai45he/firmware.bin",
-      "size": 31516,
+      "size": 31316,
       "branch": "split",
-      "commit": "36cd7eb97077a4f3accaec20b2c620a886037c7d",
-      "built_at": "2026-07-16T14:21:57.926408+00:00"
+      "commit": "874b7c5e379b45e9f6664e5adec5ba7b59f676e7",
+      "built_at": "2026-07-18T03:47:29.454783+00:00"
     },
     {
       "keyboard": "he16",
       "url": "https://raw.githubusercontent.com/gohanda11/libhmk/firmware/he16/firmware.bin",
-      "size": 30188,
+      "size": 29984,
       "branch": "split",
-      "commit": "36cd7eb97077a4f3accaec20b2c620a886037c7d",
-      "built_at": "2026-07-16T14:21:57.926433+00:00"
+      "commit": "874b7c5e379b45e9f6664e5adec5ba7b59f676e7",
+      "built_at": "2026-07-18T03:47:29.454823+00:00"
     },
     {
       "keyboard": "he60",
       "url": "https://raw.githubusercontent.com/gohanda11/libhmk/firmware/he60/firmware.bin",
-      "size": 36432,
+      "size": 36236,
       "branch": "split",
-      "commit": "36cd7eb97077a4f3accaec20b2c620a886037c7d",
-      "built_at": "2026-07-16T14:21:57.926446+00:00"
+      "commit": "874b7c5e379b45e9f6664e5adec5ba7b59f676e7",
+      "built_at": "2026-07-18T03:47:29.454834+00:00"
     },
     {
       "keyboard": "he60-flexcut",
       "url": "https://raw.githubusercontent.com/gohanda11/libhmk/firmware/he60-flexcut/firmware.bin",
-      "size": 32732,
+      "size": 32548,
       "branch": "split",
-      "commit": "36cd7eb97077a4f3accaec20b2c620a886037c7d",
-      "built_at": "2026-07-16T14:21:57.926460+00:00"
+      "commit": "874b7c5e379b45e9f6664e5adec5ba7b59f676e7",
+      "built_at": "2026-07-18T03:47:29.454845+00:00"
     },
     {
       "keyboard": "he60-v2",
       "url": "https://raw.githubusercontent.com/gohanda11/libhmk/firmware/he60-v2/firmware.bin",
-      "size": 32480,
+      "size": 32276,
       "branch": "split",
-      "commit": "36cd7eb97077a4f3accaec20b2c620a886037c7d",
-      "built_at": "2026-07-16T14:21:57.926471+00:00"
+      "commit": "874b7c5e379b45e9f6664e5adec5ba7b59f676e7",
+      "built_at": "2026-07-18T03:47:29.454853+00:00"
     },
     {
       "keyboard": "m256-whe",
       "url": "https://raw.githubusercontent.com/gohanda11/libhmk/firmware/m256-whe/firmware.bin",
-      "size": 32332,
+      "size": 32132,
       "branch": "split",
-      "commit": "36cd7eb97077a4f3accaec20b2c620a886037c7d",
-      "built_at": "2026-07-16T14:21:57.926482+00:00"
+      "commit": "874b7c5e379b45e9f6664e5adec5ba7b59f676e7",
+      "built_at": "2026-07-18T03:47:29.454862+00:00"
     },
     {
       "keyboard": "split60he",
       "url": "https://raw.githubusercontent.com/gohanda11/libhmk/firmware/split60he/firmware.bin",
-      "size": 38836,
+      "size": 38928,
       "branch": "split",
-      "commit": "36cd7eb97077a4f3accaec20b2c620a886037c7d",
-      "built_at": "2026-07-16T14:21:57.926495+00:00"
+      "commit": "874b7c5e379b45e9f6664e5adec5ba7b59f676e7",
+      "built_at": "2026-07-18T03:47:29.454872+00:00"
     }
   ]
 }
