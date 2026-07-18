@@ -24,6 +24,10 @@
 // Frame sync byte
 #define SPLIT_SYNC_BYTE 0xAB
 
+// Protocol version. Frames with a mismatched version are rejected so halves
+// running incompatible firmware fail fast instead of misreading payloads.
+#define SPLIT_PROTOCOL_VERSION 1
+
 // Maximum payload size for a single frame
 #define SPLIT_MAX_PAYLOAD_SIZE 128
 
@@ -34,7 +38,7 @@
 typedef enum {
   // Master -> Slave: poll request (half-duplex)
   SPLIT_FRAME_POLL = 0x00,
-  // Slave -> Master: key press bitmap and distance array
+  // Slave -> Master: key distance array
   SPLIT_FRAME_KEY_STATE = 0x01,
   // Slave -> Master: full analog state for hmkconf compatibility
   SPLIT_FRAME_ANALOG_STATE = 0x02,
@@ -74,6 +78,8 @@ typedef enum {
 typedef struct __attribute__((packed)) {
   // Sync byte
   uint8_t sync;
+  // Protocol version (SPLIT_PROTOCOL_VERSION)
+  uint8_t version;
   // Frame type
   uint8_t type;
   // Payload length
@@ -86,8 +92,7 @@ typedef struct __attribute__((packed)) {
 
 // Key/analog payloads are defined in src/split.c and are always sized to
 // SPLIT_NUM_KEYS_LOCAL_MAX so asymmetric halves (e.g. 30 vs 39) keep a stable
-// on-wire layout. The pressed bitmap uses 32-bit bitmap_t words:
-//   bitmap words = ceil(SPLIT_NUM_KEYS_LOCAL_MAX / 32)
+// on-wire layout:
 //   distance[SPLIT_NUM_KEYS_LOCAL_MAX]
 
 typedef struct __attribute__((packed)) {

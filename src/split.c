@@ -20,7 +20,6 @@
 #include "eeconfig.h"
 #include "hardware/hardware.h"
 #include "hardware/split_transport_api.h"
-#include "lib/bitmap.h"
 #include "matrix.h"
 #include "pointing_device.h"
 #include "split_protocol.h"
@@ -44,6 +43,21 @@
 #define SPLIT_POLL_INTERVAL_MS 2
 #endif
 
+#if !defined(SPLIT_RECONNECT_POLL_INTERVAL_MS)
+// Poll interval while the link is down. Much longer than the connected poll
+// interval so a missing slave does not make the master block on a response
+// timeout every matrix cycle. The slave loops on a short receive window, so
+// it still catches these slower polls quickly.
+#define SPLIT_RECONNECT_POLL_INTERVAL_MS 50
+#endif
+
+#if !defined(SPLIT_SLAVE_DISCONNECTED_TIMEOUT_MS)
+// Poll wait timeout for a disconnected slave. Kept short so an unpaired half
+// does not stall its main loop waiting for a master that is not polling; the
+// fast loop still catches the master's reconnect polls.
+#define SPLIT_SLAVE_DISCONNECTED_TIMEOUT_MS 2
+#endif
+
 #if !defined(SPLIT_MAX_CONNECTION_ERRORS)
 // Number of consecutive communication errors before considering disconnected
 #define SPLIT_MAX_CONNECTION_ERRORS 8
@@ -54,17 +68,11 @@
 #define SPLIT_ANALOG_SYNC_INTERVAL_MS 500
 #endif
 
-#if !defined(SPLIT_LAYER_SYNC_INTERVAL_MS)
-// Interval between layer state synchronizations
-#define SPLIT_LAYER_SYNC_INTERVAL_MS 50
-#endif
-
 //--------------------------------------------------------------------+
 // Local Types
 //--------------------------------------------------------------------+
 
 typedef struct __attribute__((packed)) {
-  bitmap_t pressed_bitmap[M_DIV_CEIL(SPLIT_NUM_KEYS_LOCAL_MAX, 32)];
   uint8_t distance[SPLIT_NUM_KEYS_LOCAL_MAX];
 } split_key_state_payload_t;
 
@@ -91,7 +99,6 @@ static uint8_t local_default_layer;
 static bool layer_state_changed;
 
 static uint32_t last_analog_sync;
-static uint32_t last_layer_sync;
 static uint32_t last_poll_time;
 
 static split_analog_state_payload_t cached_analog_state;
@@ -109,6 +116,8 @@ static bool transport_initialized;
 // Master/Slave Promotion
 //--------------------------------------------------------------------+
 
+static void split_clear_remote_keys(void);
+
 static bool split_usb_active(void) {
   return tud_mounted() || tud_connected();
 }
@@ -120,6 +129,10 @@ static void split_promote_to_master(void) {
   // The half that enumerates over USB is always treated as the left half.
   split_set_handedness(true);
   analog_reconfigure_handedness(true);
+  // The local key slots changed with the handedness switch (right -> left),
+  // so the boot-time calibration no longer applies. Recalibrate the new
+  // local keys; tud_task() inside keeps USB enumeration alive.
+  matrix_recalibrate(false);
 #endif
 
   split_transport_master_init();
@@ -137,6 +150,28 @@ static void split_promote_to_master(void) {
   local_default_layer = 0;
   layer_state_changed = false;
   last_analog_sync = timer_read();
+  split_clear_remote_keys();
+}
+
+static void split_demote_to_slave(void) {
+  is_master = false;
+
+#if defined(SPLIT_HANDEDNESS_USB)
+  // Without USB this half reverts to the right half.
+  split_set_handedness(false);
+  analog_reconfigure_handedness(false);
+  matrix_recalibrate(false);
+#endif
+
+  split_transport_slave_init();
+  split_transport_clear();
+
+  connected = false;
+  connection_errors = 0;
+  slave_recalibrate_pending = false;
+  // This half may still hold pressed state for the other half's keys from
+  // when it was the master.
+  split_clear_remote_keys();
 }
 
 //--------------------------------------------------------------------+
@@ -166,11 +201,13 @@ static bool split_detect_left(void) {
 #elif defined(SPLIT_HANDEDNESS_PIN)
   return split_detect_handedness_pin();
 #elif defined(SPLIT_HANDEDNESS_EEPROM)
-  return eeconfig->split_handedness != 0;
+  // Stored handedness convention: 0 = left, 1 = right (see eeconfig.h)
+  return eeconfig->split_handedness == 0;
 #elif defined(SPLIT_HANDEDNESS_USB)
-  // USB-side handedness is resolved after USB enumeration in split_post_init().
-  // split_pre_init() defaults to left in this mode.
-  return true;
+  // In USB handedness mode the USB-connected half promotes to master and is
+  // treated as the left half. Until USB is detected this half runs as a
+  // slave, which is always the right half in this mode.
+  return false;
 #else
   // Default to left if no handedness method is configured
   return true;
@@ -191,12 +228,9 @@ static void split_set_handedness(bool left) {
 
 // Payload sizes are always based on SPLIT_NUM_KEYS_LOCAL_MAX so the on-wire
 // layout matches the packed structs below. Using the per-half key count here
-// breaks distance/ADC alignment when left and right have different key counts
-// (different bitmap word counts).
+// breaks distance/ADC alignment when left and right have different key counts.
 static uint8_t split_key_state_payload_size(void) {
-  return (uint8_t)(M_DIV_CEIL((uint32_t)SPLIT_NUM_KEYS_LOCAL_MAX, 32) *
-                       sizeof(bitmap_t) +
-                   (uint32_t)SPLIT_NUM_KEYS_LOCAL_MAX);
+  return (uint8_t)SPLIT_NUM_KEYS_LOCAL_MAX;
 }
 
 static uint8_t split_analog_state_payload_size(void) {
@@ -204,20 +238,19 @@ static uint8_t split_analog_state_payload_size(void) {
                    (sizeof(uint16_t) + sizeof(uint8_t)));
 }
 
-_Static_assert(
-    (M_DIV_CEIL(SPLIT_NUM_KEYS_LOCAL_MAX, 32) * sizeof(bitmap_t) +
-     SPLIT_NUM_KEYS_LOCAL_MAX) <= SPLIT_MAX_PAYLOAD_SIZE,
-    "Key state payload exceeds SPLIT_MAX_PAYLOAD_SIZE");
+_Static_assert(SPLIT_NUM_KEYS_LOCAL_MAX <= SPLIT_MAX_PAYLOAD_SIZE,
+               "Key state payload exceeds SPLIT_MAX_PAYLOAD_SIZE");
 _Static_assert((SPLIT_NUM_KEYS_LOCAL_MAX * (sizeof(uint16_t) + sizeof(uint8_t))) <=
                    SPLIT_MAX_PAYLOAD_SIZE,
                "Analog state payload exceeds SPLIT_MAX_PAYLOAD_SIZE");
 
 static void split_build_key_state_payload(split_key_state_payload_t *payload) {
+  // Zero the full MAX-sized struct so unused asymmetric-half slots are not
+  // sent as stack garbage (which also makes the CRC nondeterministic).
   memset(payload, 0, sizeof(*payload));
 
   for (uint32_t i = 0; i < num_local_keys; i++) {
     const uint8_t key = key_offset + i;
-    bitmap_set(payload->pressed_bitmap, i, key_matrix[key].is_pressed);
     payload->distance[i] = key_matrix[key].distance;
   }
 }
@@ -228,8 +261,7 @@ split_apply_key_state_payload(const split_key_state_payload_t *payload) {
     const uint8_t key = remote_key_offset + i;
     // Configuration writes only reach the USB-connected half, so the slave's
     // local actuation profile may be stale. Evaluate the received distance
-    // against the master's authoritative profile instead of trusting the
-    // slave's pressed bitmap.
+    // against the master's authoritative profile.
     matrix_update_press_state(key, payload->distance[i]);
   }
 }
@@ -270,7 +302,7 @@ static uint32_t split_remaining_timeout(uint32_t start, uint32_t timeout_ms) {
 static bool split_receive_frame(uint8_t *type, uint8_t *payload,
                                 uint8_t *payload_len, uint32_t timeout_ms) {
   const uint32_t start = timer_read();
-  uint8_t header[3];
+  uint8_t header[4];
 
   // Resync: discard bytes until the sync byte is found or we time out
   while (true) {
@@ -283,17 +315,21 @@ static bool split_receive_frame(uint8_t *type, uint8_t *payload,
       break;
   }
 
-  // Read the rest of the header
+  // Read the rest of the header (version, type, length)
   {
     uint32_t remaining = split_remaining_timeout(start, timeout_ms);
     if (remaining == 0)
       return false;
-    if (!split_transport_receive(&header[1], 2, remaining))
+    if (!split_transport_receive(&header[1], 3, remaining))
       return false;
   }
 
-  *type = header[1];
-  *payload_len = header[2];
+  // Reject frames from incompatible firmware versions
+  if (header[1] != SPLIT_PROTOCOL_VERSION)
+    return false;
+
+  *type = header[2];
+  *payload_len = header[3];
 
   if (*payload_len > SPLIT_MAX_PAYLOAD_SIZE)
     return false;
@@ -315,14 +351,15 @@ static bool split_receive_frame(uint8_t *type, uint8_t *payload,
       return false;
   }
 
-  uint8_t frame_buf[SPLIT_MAX_PAYLOAD_SIZE + 3];
+  uint8_t frame_buf[SPLIT_MAX_PAYLOAD_SIZE + 4];
   frame_buf[0] = header[0];
   frame_buf[1] = header[1];
   frame_buf[2] = header[2];
+  frame_buf[3] = header[3];
   if (*payload_len > 0)
-    memcpy(&frame_buf[3], payload, *payload_len);
+    memcpy(&frame_buf[4], payload, *payload_len);
 
-  if (split_protocol_crc8(frame_buf, 3 + *payload_len) != rx_crc)
+  if (split_protocol_crc8(frame_buf, 4 + *payload_len) != rx_crc)
     return false;
 
   return true;
@@ -330,7 +367,7 @@ static bool split_receive_frame(uint8_t *type, uint8_t *payload,
 
 static bool split_send_frame(split_frame_type_t type, const uint8_t *payload,
                              uint8_t payload_len) {
-  uint8_t frame[SPLIT_MAX_PAYLOAD_SIZE + 4];
+  uint8_t frame[SPLIT_MAX_PAYLOAD_SIZE + 5];
   uint8_t frame_len = split_protocol_encode_frame(type, payload, payload_len,
                                                   frame, sizeof(frame));
   if (frame_len == 0)
@@ -386,8 +423,11 @@ static void split_master_task(void) {
 
   // Rate-limit polls so the slave is not overrun while scanning. Measure the
   // interval from the end of the previous exchange so a slow round-trip cannot
-  // collapse into back-to-back polls.
-  if (timer_elapsed(last_poll_time) < SPLIT_POLL_INTERVAL_MS)
+  // collapse into back-to-back polls. While disconnected, back off to the
+  // slower reconnect interval so the response wait does not stall every cycle.
+  const uint32_t poll_interval =
+      connected ? SPLIT_POLL_INTERVAL_MS : SPLIT_RECONNECT_POLL_INTERVAL_MS;
+  if (timer_elapsed(last_poll_time) < poll_interval)
     return;
 
   // Clear any stale receive data, then poll the slave for its key state.
@@ -512,7 +552,6 @@ followup:
     if (split_send_frame(SPLIT_FRAME_LAYER_STATE, (uint8_t *)&layer_payload,
                          sizeof(layer_payload))) {
       layer_state_changed = false;
-      last_layer_sync = timer_read();
     }
   }
 
@@ -539,9 +578,13 @@ static void split_slave_task(void) {
   uint8_t payload_len;
 
   // Wait for a poll from the master. This also works for full-duplex, as the
-  // master always sends a poll before expecting a response.
-  bool got_poll = split_receive_frame(&type, payload, &payload_len,
-                                      SPLIT_CONNECTION_TIMEOUT_MS);
+  // master always sends a poll before expecting a response. While disconnected
+  // use a short window so the slave does not stall its loop; the master polls
+  // slowly in this state, but the fast slave loop still catches each poll.
+  bool got_poll = split_receive_frame(
+      &type, payload, &payload_len,
+      connected ? SPLIT_CONNECTION_TIMEOUT_MS
+                : SPLIT_SLAVE_DISCONNECTED_TIMEOUT_MS);
   if (!got_poll || type != SPLIT_FRAME_POLL) {
     // Recover from framing/overrun garbage so the next poll can be recognized.
     split_transport_clear();
@@ -574,11 +617,11 @@ static void split_slave_task(void) {
   if (request_analog) {
     split_analog_state_payload_t analog_payload;
     split_build_analog_state_payload(&analog_payload);
-    if (!split_send_frame(SPLIT_FRAME_ANALOG_STATE, (uint8_t *)&analog_payload,
-                          split_analog_state_payload_size())) {
-      // Keep going so pointing/follow-ups stay aligned with the master's plan.
-      split_update_connection(false);
-    } else {
+    // Analog is best-effort like on the master side: a failed send must not
+    // count as a link error. Keep going so pointing/follow-ups stay aligned
+    // with the master's plan.
+    if (split_send_frame(SPLIT_FRAME_ANALOG_STATE, (uint8_t *)&analog_payload,
+                         split_analog_state_payload_size())) {
       last_analog_sync = timer_read();
     }
   }
@@ -596,10 +639,11 @@ static void split_slave_task(void) {
     if (!split_send_frame(SPLIT_FRAME_POINTING, (uint8_t *)&pointing_payload,
                           sizeof(pointing_payload))) {
       // get_local_delta() already cleared the accumulators; put the motion
-      // back so a later successful transfer can deliver it. Still fall through
-      // to the follow-up wait when the poll promised layer/control frames.
+      // back so a later successful transfer can deliver it. Pointing is
+      // best-effort like on the master side, so a failed send does not count
+      // as a link error. Still fall through to the follow-up wait when the
+      // poll promised layer/control frames.
       pointing_device_restore_local_delta(dx, dy);
-      split_update_connection(false);
     }
   }
 #endif
@@ -674,7 +718,6 @@ void split_pre_init(void) {
   // last_analog_sync=0 forces a large analog frame on the very first polls and
   // readily desynchronizes half-duplex before KEY_STATE traffic stabilizes.
   last_analog_sync = timer_read();
-  last_layer_sync = 0;
   last_poll_time = 0;
   analog_state_valid = false;
   pending_control_command = 0;
@@ -706,15 +749,23 @@ void split_post_init(void) {
 }
 
 void split_task(void) {
-  if (!is_master && split_usb_active()) {
+  if (is_master) {
+    if (!split_usb_active()) {
+      // USB was unplugged (or moved to the other half). Demote so both halves
+      // cannot remain masters and collide on the shared UART line.
+      split_demote_to_slave();
+      return;
+    }
+    split_master_task();
+    return;
+  }
+
+  if (split_usb_active()) {
     split_promote_to_master();
     return;
   }
 
-  if (is_master)
-    split_master_task();
-  else
-    split_slave_task();
+  split_slave_task();
 }
 
 bool split_is_master(void) { return is_master; }
@@ -745,7 +796,7 @@ void split_notify_layer_state(uint16_t layer_mask, uint8_t default_layer) {
 bool split_is_connected(void) { return connected; }
 
 bool split_send_control_command(uint8_t command) {
-  if (!is_master)
+  if (!is_master || !connected)
     return false;
 
   pending_control_command = command;

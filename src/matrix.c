@@ -57,6 +57,11 @@ static bitmap_t rapid_trigger_disabled[] = MAKE_BITMAP(NUM_KEYS);
 // the slave is powered only through a 3.3V/GND/DATA tether). Peak travel is
 // tracked per key and used to stretch distance toward the full 0-255 range.
 // On a healthy half the peak quickly reaches 255 and scaling becomes a no-op.
+// Split-only: on non-split keyboards the ADC range is always healthy and the
+// saturation behavior while the peak is still learning would distort the
+// distance curve.
+
+#if defined(SPLIT_KEYBOARD)
 
 #if !defined(MATRIX_DISTANCE_AGC_MIN_PEAK)
 // Do not engage scaling until a key has traveled at least this far. Prevents
@@ -97,6 +102,8 @@ static void matrix_distance_agc_decay(void) {
   }
 }
 
+#endif // defined(SPLIT_KEYBOARD)
+
 void matrix_init(void) { matrix_recalibrate(false); }
 
 void matrix_recalibrate(bool reset_bottom_out_threshold) {
@@ -114,18 +121,25 @@ void matrix_recalibrate(bool reset_bottom_out_threshold) {
     key_matrix[i].extremum = 0;
     key_matrix[i].key_dir = KEY_DIR_INACTIVE;
     key_matrix[i].is_pressed = false;
+#if defined(SPLIT_KEYBOARD)
     distance_peak[i] = 0;
+#endif
   }
+#if defined(SPLIT_KEYBOARD)
   distance_agc_decay_timer = timer_read();
+#endif
 
   // We only calibrate the rest value. The bottom-out value will be updated
   // during the scan process.
   const uint32_t calibration_start = timer_read();
   while (timer_elapsed(calibration_start) < MATRIX_CALIBRATION_DURATION) {
-    // Keep USB alive during the blocking calibration window so post-init
-    // recalibration cannot stall enumeration on the master half.
-    tud_task();
 #if defined(SPLIT_KEYBOARD)
+    // Keep USB alive during the blocking calibration window so post-init
+    // recalibration cannot stall enumeration on the master half. Only split
+    // keyboards do this: COMMAND_RECALIBRATE may invoke matrix_recalibrate()
+    // from within a tud_task() callback, so non-split builds keep the
+    // original behavior and avoid re-entering tud_task() recursively.
+    tud_task();
     // Drain split RX only after the UART is initialized (see split_post_init).
     split_calibration_idle();
 #endif
@@ -230,6 +244,7 @@ static void matrix_scan_key(uint32_t i) {
 
   key_matrix[i].adc_filtered = new_adc_filtered;
 
+#if defined(SPLIT_KEYBOARD)
   // Soft rest adaptation: if the key is released and the filtered ADC is
   // clearly below the calibrated rest, drift rest downward. This removes the
   // dead zone that remains on some slave keys after boot-time calibration.
@@ -240,6 +255,7 @@ static void matrix_scan_key(uint32_t i) {
     key_matrix[i].adc_bottom_out_value =
         matrix_bottom_out_value((uint8_t)i, key_matrix[i].adc_rest_value);
   }
+#endif
 
   if (new_adc_filtered >=
       key_matrix[i].adc_bottom_out_value + MATRIX_CALIBRATION_EPSILON)
@@ -250,8 +266,12 @@ static void matrix_scan_key(uint32_t i) {
   const uint8_t raw_distance = adc_to_distance(
       new_adc_filtered, key_matrix[i].adc_rest_value,
       key_matrix[i].adc_bottom_out_value);
+#if defined(SPLIT_KEYBOARD)
   matrix_update_press_state((uint8_t)i,
                             matrix_apply_distance_agc((uint8_t)i, raw_distance));
+#else
+  matrix_update_press_state((uint8_t)i, raw_distance);
+#endif
 }
 
 void matrix_scan(void) {
@@ -264,7 +284,9 @@ void matrix_scan(void) {
   for (uint32_t i = 0; i < NUM_KEYS; i++)
     matrix_scan_key(i);
 #endif
+#if defined(SPLIT_KEYBOARD)
   matrix_distance_agc_decay();
+#endif
 }
 
 void matrix_disable_rapid_trigger(uint8_t key, bool disable) {

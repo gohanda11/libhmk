@@ -25,11 +25,14 @@ driver = utils.get_driver(keyboard)
 driver_name = kb_json.hardware.driver
 
 # Add source filter for driver source files
-env.Append(SRC_FILTER=[
+src_filter = [
     "-<hardware/>",
     f"+<hardware/{driver_name}/>",
-    "+<hardware/spi_soft.c>",
-])
+]
+# The soft-SPI driver is only needed when a pointing device is present
+if kb_json.pointing_device is not None and kb_json.pointing_device.enabled:
+    src_filter.append("+<hardware/spi_soft.c>")
+env.Append(SRC_FILTER=src_filter)
 
 # Build Flags
 build_flags = utils.CompilerFlags()
@@ -166,9 +169,13 @@ if kb_json.split is not None and kb_json.split.enabled:
     if analog_left.mux is not None:
         mux = analog_left.mux
         build_flags.define("ADC_NUM_MUX_INPUTS", max_mux_inputs)
+        # Pad the channel array to the maximum count so its length matches
+        # ADC_NUM_MUX_INPUTS. Padded entries are never indexed.
+        mux_channels = driver.metadata.adc.to_adc_inputs(mux.input)
+        mux_channels.extend([0] * (max_mux_inputs - len(mux_channels)))
         build_flags.define(
             "ADC_MUX_INPUT_CHANNELS",
-            utils.to_c_array(driver.metadata.adc.to_adc_inputs(mux.input)),
+            utils.to_c_array(mux_channels),
         )
         build_flags.define("ADC_NUM_MUX_SELECT_PINS", len(mux.select))
         ports, pin_nums = driver.metadata.adc.to_gpio_array(mux.select)
@@ -185,12 +192,18 @@ if kb_json.split is not None and kb_json.split.enabled:
     if analog_left.raw is not None:
         raw = analog_left.raw
         build_flags.define("ADC_NUM_RAW_INPUTS", max_raw_inputs)
+        # Pad the channel and vector arrays to the maximum count so their
+        # lengths match ADC_NUM_RAW_INPUTS. Padded entries are never indexed.
+        raw_channels = driver.metadata.adc.to_adc_inputs(raw.input)
+        raw_channels.extend([0] * (max_raw_inputs - len(raw_channels)))
         build_flags.define(
             "ADC_RAW_INPUT_CHANNELS",
-            utils.to_c_array(driver.metadata.adc.to_adc_inputs(raw.input)),
+            utils.to_c_array(raw_channels),
         )
+        raw_vector = list(raw.vector)
+        raw_vector.extend([0] * (max_raw_inputs - len(raw_vector)))
         build_flags.define(
-            "ADC_RAW_INPUT_VECTOR", utils.to_c_array(raw.vector)
+            "ADC_RAW_INPUT_VECTOR", utils.to_c_array(raw_vector)
         )
 
     # Define per-half macros with padded matrices.

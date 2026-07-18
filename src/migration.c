@@ -364,8 +364,10 @@ bool v1_5_global_config_func(uint8_t *dst, const uint8_t *src) {
 
   // Copy `magic_start` to `last_non_default_profile`
   migration_memcpy(&dst, &src, 14 + NUM_KEYS * 2);
-  // Default `split_handedness` to left
-  migration_assign_uint8_t(&dst, 0);
+  // Default `split_handedness` to the build-time default (0 = left,
+  // 1 = right; falls back to left when DEFAULT_SPLIT_HANDEDNESS is undefined,
+  // e.g. on non-split keyboards).
+  migration_assign_uint8_t(&dst, DEFAULT_SPLIT_HANDEDNESS);
 
   return true;
 }

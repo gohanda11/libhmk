@@ -76,7 +76,16 @@ int main(void) {
 #if defined(POINTING_DEVICE_ENABLED)
     pointing_device_task();
 #endif
+#if defined(SPLIT_KEYBOARD)
+    // The slave half does not resolve keycodes or send HID reports; all of
+    // that is handled on the master. Skipping layout_task() also prevents
+    // slave-side effects such as SP_BOOT bootloader resets and PROFILE_*
+    // EEPROM writes.
+    if (split_is_master())
+      layout_task();
+#else
     layout_task();
+#endif
     xinput_task();
   }
 

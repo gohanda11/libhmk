@@ -40,6 +40,10 @@
 #error "SPLIT_UART_BAUD_RATE is not defined"
 #endif
 
+// Maximum time in milliseconds to wait for the transmit buffer to become
+// empty or for transmission to complete before aborting the transfer.
+#define SPLIT_TRANSPORT_SEND_TIMEOUT_MS 10
+
 //--------------------------------------------------------------------+
 // USART Instance Mapping
 //--------------------------------------------------------------------+
@@ -189,9 +193,9 @@ bool split_transport_send(const uint8_t *data, uint8_t len) {
   split_transport_enable_tx();
 
   for (uint8_t i = 0; i < len; i++) {
-    uint32_t timeout = 10000;
+    const uint32_t tx_start = timer_read();
     while (usart_flag_get(usart, USART_TDBE_FLAG) == RESET) {
-      if (--timeout == 0) {
+      if (timer_elapsed(tx_start) >= SPLIT_TRANSPORT_SEND_TIMEOUT_MS) {
         split_transport_disable_tx();
         return false;
       }
@@ -200,9 +204,9 @@ bool split_transport_send(const uint8_t *data, uint8_t len) {
   }
 
   // Wait for transmission complete
-  uint32_t timeout = 10000;
+  const uint32_t tc_start = timer_read();
   while (usart_flag_get(usart, USART_TDC_FLAG) == RESET) {
-    if (--timeout == 0) {
+    if (timer_elapsed(tc_start) >= SPLIT_TRANSPORT_SEND_TIMEOUT_MS) {
       split_transport_disable_tx();
       return false;
     }

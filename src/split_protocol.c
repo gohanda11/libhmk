@@ -15,7 +15,7 @@
 
 #include "split_protocol.h"
 
-// CRC8 polynomial: x^8 + x^2 + x + 1 (CRC-8-CCITT)
+// CRC8 polynomial: x^8 + x^2 + x + 1, init 0xFF (CRC-8/SMBUS)
 #define CRC8_POLYNOMIAL 0x07
 
 uint8_t split_protocol_crc8(const uint8_t *data, uint8_t len) {
@@ -39,18 +39,19 @@ uint8_t split_protocol_encode_frame(split_frame_type_t type,
                                     uint8_t *out_buf, uint8_t out_len) {
   if (payload_len > SPLIT_MAX_PAYLOAD_SIZE)
     return 0;
-  if (out_len < payload_len + 4)
+  if (out_len < payload_len + 5)
     return 0;
 
   out_buf[0] = SPLIT_SYNC_BYTE;
-  out_buf[1] = (uint8_t)type;
-  out_buf[2] = payload_len;
+  out_buf[1] = SPLIT_PROTOCOL_VERSION;
+  out_buf[2] = (uint8_t)type;
+  out_buf[3] = payload_len;
 
   if (payload_len > 0)
-    memcpy(&out_buf[3], payload, payload_len);
+    memcpy(&out_buf[4], payload, payload_len);
 
-  out_buf[3 + payload_len] =
-      split_protocol_crc8(out_buf, 3 + payload_len);
+  out_buf[4 + payload_len] =
+      split_protocol_crc8(out_buf, 4 + payload_len);
 
-  return 4 + payload_len;
+  return 5 + payload_len;
 }

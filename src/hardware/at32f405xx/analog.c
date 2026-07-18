@@ -129,9 +129,9 @@ static const uint16_t mux_select_pins[] = ADC_MUX_SELECT_PINS;
 _Static_assert(M_ARRAY_SIZE(mux_select_pins) == ADC_NUM_MUX_SELECT_PINS,
                "Invalid number of multiplexer select pins");
 
-// Matrix containing the key index for each multiplexer input channel and each
-// ADC channel. If the value is at least `NUM_KEYS`, the corresponding key is
-// not connected.
+// Matrix containing the 1-based key index for each multiplexer input channel
+// and each ADC channel. A value of 0 means the input is not connected;
+// entries whose index would fall outside `adc_values` are ignored.
 static const uint16_t mux_input_matrix[][ADC_NUM_MUX_INPUTS] =
     ADC_MUX_INPUT_MATRIX;
 
@@ -146,8 +146,9 @@ static const uint8_t raw_input_channels[] = ADC_RAW_INPUT_CHANNELS;
 _Static_assert(M_ARRAY_SIZE(raw_input_channels) == ADC_NUM_RAW_INPUTS,
                "Invalid number of ADC raw inputs");
 
-// Vector containing the key index for each raw input channel. If the value is
-// at least `NUM_KEYS`, the corresponding key is not connected.
+// Vector containing the 1-based key index for each raw input channel. A
+// value of 0 means the input is not connected; entries whose index would fall
+// outside `adc_values` are ignored.
 static const uint16_t raw_input_vector[] = ADC_RAW_INPUT_VECTOR;
 
 _Static_assert(M_ARRAY_SIZE(raw_input_vector) == ADC_NUM_RAW_INPUTS,
@@ -380,7 +381,9 @@ void DMA1_Channel1_IRQHandler(void) {
 #if ADC_NUM_MUX_INPUTS > 0
     for (uint32_t i = 0; i < num_mux_inputs; i++) {
       const uint16_t key = mux_input_matrix[current_mux_channel][i];
-      if (key)
+      // A zero entry means the input is not connected; also guard against
+      // out-of-range entries so a misconfigured table cannot corrupt memory.
+      if (key != 0 && split_get_key_offset() + key - 1 < NUM_KEYS)
         adc_values[split_get_key_offset() + key - 1] = adc_buffer[i];
     }
 #endif
@@ -388,7 +391,7 @@ void DMA1_Channel1_IRQHandler(void) {
 #if ADC_NUM_RAW_INPUTS > 0
     for (uint32_t i = 0; i < num_raw_inputs; i++) {
       const uint16_t key = raw_input_vector[i];
-      if (key)
+      if (key != 0 && split_get_key_offset() + key - 1 < NUM_KEYS)
         adc_values[split_get_key_offset() + key - 1] =
             adc_buffer[num_mux_inputs + i];
     }

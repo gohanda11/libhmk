@@ -13,7 +13,20 @@
 
 from enum import Enum
 from typing import Literal
-from pydantic import BaseModel, Field, NonNegativeInt, PositiveFloat, PositiveInt
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    NonNegativeInt,
+    PositiveFloat,
+    PositiveInt,
+    model_validator,
+)
+
+
+# Base model that rejects unknown fields instead of silently ignoring them
+class StrictBaseModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
 
 
 class KeyboardUSBPort(str, Enum):
@@ -22,7 +35,7 @@ class KeyboardUSBPort(str, Enum):
 
 
 # USB Configuration
-class KeyboardUSB(BaseModel):
+class KeyboardUSB(StrictBaseModel):
     # USB Vendor ID
     vid: str = Field(pattern=r"^0x[0-9A-Fa-f]{4}$")
     # USB Product ID
@@ -31,7 +44,7 @@ class KeyboardUSB(BaseModel):
 
 
 # Keyboard Configuration
-class KeyboardKeyboard(BaseModel):
+class KeyboardKeyboard(StrictBaseModel):
     num_profiles: int = Field(ge=1, le=8)
     num_layers: int = Field(ge=1, le=8)
     num_keys: int = Field(ge=1, le=256)
@@ -39,7 +52,7 @@ class KeyboardKeyboard(BaseModel):
 
 
 # Hardware Configuration
-class KeyboardHardware(BaseModel):
+class KeyboardHardware(StrictBaseModel):
     # High-speed external oscillator value in Hz
     hse_value: PositiveInt
     # Keyboard driver name
@@ -47,7 +60,7 @@ class KeyboardHardware(BaseModel):
 
 
 # Raw ADC input configuration
-class KeyboardAnalogRaw(BaseModel):
+class KeyboardAnalogRaw(StrictBaseModel):
     # Array of raw ADC input channels. If a string is provided, it is used as the GPIO pin name
     input: list[NonNegativeInt | str]
     # Array of key index mappings for the raw ADC inputs
@@ -55,7 +68,7 @@ class KeyboardAnalogRaw(BaseModel):
 
 
 # Analog Multiplexer ADC input configuration
-class KeyboardAnalogMux(BaseModel):
+class KeyboardAnalogMux(StrictBaseModel):
     # Array of GPIO pin names for the multiplexer select lines
     select: list[str]
     # Array of ADC input channels for the multiplexers. If a string is provided, it is used as the GPIO pin name
@@ -65,7 +78,7 @@ class KeyboardAnalogMux(BaseModel):
 
 
 # Analog Configuration
-class KeyboardAnalog(BaseModel):
+class KeyboardAnalog(StrictBaseModel):
     # ADC resolution for this keyboard. A higher value means higher accuracy but slower matrix scans. Default to the maximum resolution supported by the MCU if not provided.
     adc_resolution: PositiveInt | None = None
     # Set to true if the ADC value is inversely proportional to the travel distance of the keys
@@ -77,7 +90,7 @@ class KeyboardAnalog(BaseModel):
 
 
 # Calibration Configuration
-class KeyboardCalibration(BaseModel):
+class KeyboardCalibration(StrictBaseModel):
     # See `include/lib/eeconfig.h`
     initial_rest_value: NonNegativeInt
     # See `include/lib/eeconfig.h`
@@ -85,25 +98,30 @@ class KeyboardCalibration(BaseModel):
 
 
 # Wear leveling Configuration
-class KeyboardWearLeveling(BaseModel):
+class KeyboardWearLeveling(StrictBaseModel):
     # Size of the virtual persistent storage in bytes. There must be enough RAM of this size to hold the entire virtual storage.
     virtual_size: int = Field(ge=1, le=8192)
     # Size of the write log in bytes
     write_log_size: int = Field(ge=1, le=65536)
 
 
-class KeyboardLayoutKey(BaseModel):
+class KeyboardLayoutKey(StrictBaseModel):
     key: NonNegativeInt
     w: PositiveFloat | None = None
     h: PositiveFloat | None = None
     x: float | None = None
     y: float | None = None
+    # Secondary geometry for option keys (KLE-style stepped/ISO keys)
+    w2: PositiveFloat | None = None
+    h2: PositiveFloat | None = None
+    x2: float | None = None
+    y2: float | None = None
     # Option key and value pairs for the corresponding labels
     option: tuple[int, int] | None = None
 
 
 # Keyboard Layout
-class KeyboardLayout(BaseModel):
+class KeyboardLayout(StrictBaseModel):
     # Labels for each layout option. Use a string for a toggle option, or an array for a select option
     labels: list[str | list[str]] | None = None
     # Metadata for how the keyboard should be rendered in the web configurator
@@ -111,13 +129,13 @@ class KeyboardLayout(BaseModel):
 
 
 # Per-half analog configuration for split keyboards
-class KeyboardSplitAnalog(BaseModel):
+class KeyboardSplitAnalog(StrictBaseModel):
     raw: KeyboardAnalogRaw | None = None
     mux: KeyboardAnalogMux | None = None
 
 
 # Split Keyboard Configuration
-class KeyboardSplit(BaseModel):
+class KeyboardSplit(StrictBaseModel):
     # Enable split keyboard support
     enabled: bool = False
     # UART peripheral instance (e.g., 1 for USART1, 2 for USART2)
@@ -155,13 +173,13 @@ class KeyboardSplit(BaseModel):
 
 
 # Actuation Configuration
-class KeyboardActuation(BaseModel):
+class KeyboardActuation(StrictBaseModel):
     # Default actuation point
     actuation_point: int = Field(ge=0, le=255)
 
 
 # Pointing Device Pin Configuration
-class KeyboardPointingDevicePins(BaseModel):
+class KeyboardPointingDevicePins(StrictBaseModel):
     # Chip-select GPIO pin name
     cs: str
     # SPI clock GPIO pin name
@@ -175,7 +193,7 @@ class KeyboardPointingDevicePins(BaseModel):
 
 
 # Pointing Device Configuration
-class KeyboardPointingDevice(BaseModel):
+class KeyboardPointingDevice(StrictBaseModel):
     # Enable pointing device support
     enabled: bool = False
     # Sensor type. Currently only "pmw3610" is supported.
@@ -186,8 +204,8 @@ class KeyboardPointingDevice(BaseModel):
     pins: KeyboardPointingDevicePins
     # CPI (counts per inch). PMW3610 supports 200-3200 in steps of 200.
     cpi: int = Field(default=800, ge=200, le=3200)
-    # Sensor rotation angle in degrees. Must be one of 0, 90, 180, 270.
-    angle: int = Field(default=0, ge=0, le=270)
+    # Sensor rotation angle in degrees.
+    angle: Literal[0, 90, 180, 270] = 0
     # Swap X and Y axes (applied after angle rotation)
     swap_xy: bool = False
     # Invert X axis
@@ -199,7 +217,7 @@ class KeyboardPointingDevice(BaseModel):
 
 
 # keyboard.json Schema
-class Keyboard(BaseModel):
+class Keyboard(StrictBaseModel):
     name: str
     manufacturer: str
     maintainer: str
@@ -217,3 +235,34 @@ class Keyboard(BaseModel):
     keymaps: list[list[list[str]]] | None = None
     actuation: KeyboardActuation | None = None
     pointing_device: KeyboardPointingDevice | None = None
+
+    @model_validator(mode="after")
+    def check_analog_config(self) -> "Keyboard":
+        split_enabled = self.split is not None and self.split.enabled
+        if not split_enabled:
+            # Non-split keyboards read the top-level analog section, so it
+            # must define at least one ADC input source.
+            if self.analog.raw is None and self.analog.mux is None:
+                raise ValueError(
+                    "analog.raw or analog.mux is required for non-split keyboards"
+                )
+        else:
+            # Split keyboards read analog_left/analog_right (falling back to
+            # the top-level analog section), so each half must end up with at
+            # least one ADC input source.
+            analog_left = (
+                self.split.analog_left
+                if self.split.analog_left is not None
+                else self.analog
+            )
+            analog_right = (
+                self.split.analog_right
+                if self.split.analog_right is not None
+                else self.analog
+            )
+            for name, analog in (("left", analog_left), ("right", analog_right)):
+                if analog.raw is None and analog.mux is None:
+                    raise ValueError(
+                        f"analog.raw or analog.mux is required for the {name} half"
+                    )
+        return self
