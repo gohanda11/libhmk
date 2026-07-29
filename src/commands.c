@@ -48,6 +48,110 @@ static void command_reset_staged_buffer(void) {
   staged_buffer.offset = 0;
 }
 
+
+static void command_actuation_to_u8(command_actuation_u8_t *dst,
+                                    const actuation_t *src) {
+  dst->actuation_point = distance_to_u8(src->actuation_point);
+  dst->rt_down = distance_to_u8(src->rt_down);
+  dst->rt_up = distance_to_u8(src->rt_up);
+  dst->continuous = src->continuous;
+}
+
+static void command_actuation_from_u8(actuation_t *dst,
+                                      const command_actuation_u8_t *src) {
+  dst->actuation_point = distance_from_u8(src->actuation_point);
+  dst->rt_down = distance_from_u8(src->rt_down);
+  dst->rt_up = distance_from_u8(src->rt_up);
+  dst->continuous = src->continuous;
+}
+
+static void command_actuation_to_u16(command_actuation_u16_t *dst,
+                                     const actuation_t *src) {
+  dst->actuation_point = src->actuation_point;
+  dst->rt_down = src->rt_down;
+  dst->rt_up = src->rt_up;
+  dst->continuous = src->continuous;
+}
+
+static void command_actuation_from_u16(actuation_t *dst,
+                                       const command_actuation_u16_t *src) {
+  dst->actuation_point = src->actuation_point;
+  dst->rt_down = src->rt_down;
+  dst->rt_up = src->rt_up;
+  dst->continuous = src->continuous;
+}
+
+static void command_advanced_key_to_u8(command_advanced_key_u8_t *dst,
+                                       const advanced_key_t *src) {
+  memset(dst, 0, sizeof(*dst));
+  dst->layer = src->layer;
+  dst->key = src->key;
+  dst->type = src->type;
+  switch (src->type) {
+  case AK_TYPE_NULL_BIND:
+    dst->null_bind.secondary_key = src->null_bind.secondary_key;
+    dst->null_bind.behavior = src->null_bind.behavior;
+    dst->null_bind.bottom_out_point =
+        distance_to_u8(src->null_bind.bottom_out_point);
+    break;
+  case AK_TYPE_DYNAMIC_KEYSTROKE:
+    memcpy(dst->dynamic_keystroke.keycodes, src->dynamic_keystroke.keycodes,
+           sizeof(dst->dynamic_keystroke.keycodes));
+    memcpy(dst->dynamic_keystroke.bitmap, src->dynamic_keystroke.bitmap,
+           sizeof(dst->dynamic_keystroke.bitmap));
+    dst->dynamic_keystroke.bottom_out_point =
+        distance_to_u8(src->dynamic_keystroke.bottom_out_point);
+    break;
+  case AK_TYPE_TAP_HOLD:
+    dst->tap_hold = src->tap_hold;
+    break;
+  case AK_TYPE_TOGGLE:
+    dst->toggle = src->toggle;
+    break;
+  case AK_TYPE_MACRO:
+    dst->macro = src->macro;
+    break;
+  default:
+    break;
+  }
+}
+
+static void command_advanced_key_from_u8(advanced_key_t *dst,
+                                         const command_advanced_key_u8_t *src) {
+  memset(dst, 0, sizeof(*dst));
+  dst->layer = src->layer;
+  dst->key = src->key;
+  dst->type = src->type;
+  switch (src->type) {
+  case AK_TYPE_NULL_BIND:
+    dst->null_bind.secondary_key = src->null_bind.secondary_key;
+    dst->null_bind.behavior = src->null_bind.behavior;
+    dst->null_bind.bottom_out_point =
+        distance_from_u8(src->null_bind.bottom_out_point);
+    break;
+  case AK_TYPE_DYNAMIC_KEYSTROKE:
+    memcpy(dst->dynamic_keystroke.keycodes, src->dynamic_keystroke.keycodes,
+           sizeof(dst->dynamic_keystroke.keycodes));
+    memcpy(dst->dynamic_keystroke.bitmap, src->dynamic_keystroke.bitmap,
+           sizeof(dst->dynamic_keystroke.bitmap));
+    dst->dynamic_keystroke.bottom_out_point =
+        distance_from_u8(src->dynamic_keystroke.bottom_out_point);
+    break;
+  case AK_TYPE_TAP_HOLD:
+    dst->tap_hold = src->tap_hold;
+    break;
+  case AK_TYPE_TOGGLE:
+    dst->toggle = src->toggle;
+    break;
+  case AK_TYPE_MACRO:
+    dst->macro = src->macro;
+    break;
+  default:
+    break;
+  }
+}
+
+
 /**
  * @brief Write the advanced key staged in `staged_buffer`
  *
@@ -71,6 +175,32 @@ static bool command_write_staged_advanced_key(void) {
   const bool success = EECONFIG_WRITE_N(
       profiles[profile].advanced_keys[key_index],
       &staged_buffer.data.advanced_key, sizeof(advanced_key_t));
+
+  if (profile == eeconfig->current_profile)
+    layout_load_advanced_keys();
+
+  return success;
+}
+
+static bool command_write_staged_advanced_key_u8(void) {
+  if (staged_buffer.staged_id != COMMAND_STAGED_ADVANCED_KEYS_U8)
+    return false;
+
+  const uint8_t profile = staged_buffer.profile;
+  const uint8_t key_index =
+      staged_buffer.offset / sizeof(command_advanced_key_u8_t);
+
+  if (profile >= NUM_PROFILES || key_index >= NUM_ADVANCED_KEYS)
+    return false;
+
+  advanced_key_t ak;
+  command_advanced_key_from_u8(&ak, &staged_buffer.data.advanced_key_u8);
+
+  if (profile == eeconfig->current_profile)
+    advanced_key_clear();
+
+  const bool success = EECONFIG_WRITE_N(
+      profiles[profile].advanced_keys[key_index], &ak, sizeof(advanced_key_t));
 
   if (profile == eeconfig->current_profile)
     layout_load_advanced_keys();
@@ -231,6 +361,20 @@ static void command_process(void) {
     for (uint32_t i = 0;
          i < M_ARRAY_SIZE(out->analog_info) && i + p->offset < NUM_KEYS; i++) {
       o[i].adc_value = key_matrix[i + p->offset].adc_filtered;
+      o[i].distance = distance_to_u8(key_matrix[i + p->offset].distance);
+    }
+    break;
+  }
+  case COMMAND_ANALOG_INFO_U16: {
+    const command_in_analog_info_t *p = &in->analog_info;
+    command_out_analog_info_u16_t *o = out->analog_info_u16;
+
+    COMMAND_VERIFY(p->offset < NUM_KEYS);
+
+    for (uint32_t i = 0;
+         i < M_ARRAY_SIZE(out->analog_info_u16) && i + p->offset < NUM_KEYS;
+         i++) {
+      o[i].adc_value = key_matrix[i + p->offset].adc_filtered;
       o[i].distance = key_matrix[i + p->offset].distance;
     }
     break;
@@ -380,11 +524,12 @@ static void command_process(void) {
     COMMAND_VERIFY(p->profile < NUM_PROFILES);
     COMMAND_VERIFY(p->offset < NUM_KEYS);
 
-    memcpy(out->actuation_map,
-           eeconfig->profiles[p->profile].actuation_map + p->offset,
-           M_MIN(M_ARRAY_SIZE(out->actuation_map),
-                 (uint32_t)(NUM_KEYS - p->offset)) *
-               sizeof(actuation_t));
+    const uint32_t count = M_MIN(M_ARRAY_SIZE(out->actuation_map),
+                                 (uint32_t)(NUM_KEYS - p->offset));
+    for (uint32_t i = 0; i < count; i++)
+      command_actuation_to_u8(
+          &out->actuation_map[i],
+          &eeconfig->profiles[p->profile].actuation_map[p->offset + i]);
     break;
   }
   case COMMAND_SET_ACTUATION_MAP: {
@@ -395,11 +540,82 @@ static void command_process(void) {
     COMMAND_VERIFY(p->len <= M_ARRAY_SIZE(p->actuation_map) &&
                    p->len <= NUM_KEYS - p->offset);
 
+    actuation_t converted[15];
+    for (uint32_t i = 0; i < p->len; i++)
+      command_actuation_from_u8(&converted[i], &p->actuation_map[i]);
     success = EECONFIG_WRITE_N(profiles[p->profile].actuation_map[p->offset],
-                               p->actuation_map, sizeof(actuation_t) * p->len);
+                               converted, sizeof(actuation_t) * p->len);
+    break;
+  }
+  case COMMAND_GET_ACTUATION_MAP_U16: {
+    const command_in_actuation_map_u16_t *p = &in->actuation_map_u16;
+
+    COMMAND_VERIFY(p->profile < NUM_PROFILES);
+    COMMAND_VERIFY(p->offset < NUM_KEYS);
+
+    const uint32_t count = M_MIN(M_ARRAY_SIZE(out->actuation_map_u16),
+                                 (uint32_t)(NUM_KEYS - p->offset));
+    for (uint32_t i = 0; i < count; i++)
+      command_actuation_to_u16(
+          &out->actuation_map_u16[i],
+          &eeconfig->profiles[p->profile].actuation_map[p->offset + i]);
+    break;
+  }
+  case COMMAND_SET_ACTUATION_MAP_U16: {
+    const command_in_actuation_map_u16_t *p = &in->actuation_map_u16;
+
+    COMMAND_VERIFY(p->profile < NUM_PROFILES);
+    COMMAND_VERIFY(p->offset < NUM_KEYS);
+    COMMAND_VERIFY(p->len <= M_ARRAY_SIZE(p->actuation_map) &&
+                   p->len <= NUM_KEYS - p->offset);
+
+    actuation_t converted[8];
+    for (uint32_t i = 0; i < p->len; i++)
+      command_actuation_from_u16(&converted[i], &p->actuation_map[i]);
+    success = EECONFIG_WRITE_N(profiles[p->profile].actuation_map[p->offset],
+                               converted, sizeof(actuation_t) * p->len);
     break;
   }
   case COMMAND_GET_ADVANCED_KEYS: {
+    const command_in_staged_profile_t *p = &in->staged_profile;
+    const uint32_t advanced_keys_size =
+        NUM_ADVANCED_KEYS * sizeof(command_advanced_key_u8_t);
+
+    COMMAND_VERIFY(p->profile < NUM_PROFILES);
+    COMMAND_VERIFY(p->offset < advanced_keys_size);
+
+    out->staged_profile.len = M_MIN(M_ARRAY_SIZE(out->staged_profile.data),
+                                    advanced_keys_size - p->offset);
+    for (uint32_t i = 0; i < out->staged_profile.len;) {
+      const uint32_t abs_off = p->offset + i;
+      const uint32_t key_index = abs_off / sizeof(command_advanced_key_u8_t);
+      const uint32_t item_off = abs_off % sizeof(command_advanced_key_u8_t);
+      command_advanced_key_u8_t wire;
+      command_advanced_key_to_u8(
+          &wire, &eeconfig->profiles[p->profile].advanced_keys[key_index]);
+      const uint32_t chunk = M_MIN(out->staged_profile.len - i,
+                                   sizeof(command_advanced_key_u8_t) - item_off);
+      memcpy(out->staged_profile.data + i, ((const uint8_t *)&wire) + item_off,
+             chunk);
+      i += chunk;
+    }
+    break;
+  }
+  case COMMAND_SET_ADVANCED_KEYS: {
+    const command_in_staged_profile_t *p = &in->staged_profile;
+
+    COMMAND_VERIFY(p->profile < NUM_PROFILES);
+
+    success = command_stage_write((command_staged_write_t){
+        .staged_id = COMMAND_STAGED_ADVANCED_KEYS_U8,
+        .p = (command_in_staged_profile_t *)p,
+        .field_size = NUM_ADVANCED_KEYS * sizeof(command_advanced_key_u8_t),
+        .item_size = sizeof(command_advanced_key_u8_t),
+        .write_func = command_write_staged_advanced_key_u8,
+    });
+    break;
+  }
+  case COMMAND_GET_ADVANCED_KEYS_U16: {
     const command_in_staged_profile_t *p = &in->staged_profile;
     const uint32_t advanced_keys_size =
         sizeof(eeconfig->profiles[p->profile].advanced_keys);
@@ -415,7 +631,7 @@ static void command_process(void) {
            out->staged_profile.len);
     break;
   }
-  case COMMAND_SET_ADVANCED_KEYS: {
+  case COMMAND_SET_ADVANCED_KEYS_U16: {
     const command_in_staged_profile_t *p = &in->staged_profile;
 
     COMMAND_VERIFY(p->profile < NUM_PROFILES);
