@@ -72,13 +72,24 @@
 // Local Types
 //--------------------------------------------------------------------+
 
+// Max keys per ANALOG_STATE chunk: offset(1) + 4B/key <= 128
+#define SPLIT_ANALOG_STATE_KEYS_PER_FRAME 28
+#define SPLIT_KEY_STATE_KEYS_PER_FRAME \
+  ((SPLIT_MAX_PAYLOAD_SIZE - 1) / (uint8_t)sizeof(uint16_t))
+
 typedef struct __attribute__((packed)) {
-  uint8_t distance[SPLIT_NUM_KEYS_LOCAL_MAX];
+  uint8_t offset;
+  uint16_t distance[SPLIT_KEY_STATE_KEYS_PER_FRAME];
 } split_key_state_payload_t;
 
 typedef struct __attribute__((packed)) {
-  uint16_t adc_filtered[SPLIT_NUM_KEYS_LOCAL_MAX];
-  uint8_t distance[SPLIT_NUM_KEYS_LOCAL_MAX];
+  uint16_t adc_filtered;
+  uint16_t distance;
+} split_analog_key_t;
+
+typedef struct __attribute__((packed)) {
+  uint8_t offset;
+  split_analog_key_t keys[SPLIT_ANALOG_STATE_KEYS_PER_FRAME];
 } split_analog_state_payload_t;
 
 //--------------------------------------------------------------------+
@@ -101,7 +112,6 @@ static bool layer_state_changed;
 static uint32_t last_analog_sync;
 static uint32_t last_poll_time;
 
-static split_analog_state_payload_t cached_analog_state;
 static bool analog_state_valid;
 
 static uint8_t pending_control_command;
@@ -226,39 +236,53 @@ static void split_set_handedness(bool left) {
 // Payload Helpers
 //--------------------------------------------------------------------+
 
-// Payload sizes are always based on SPLIT_NUM_KEYS_LOCAL_MAX so the on-wire
-// layout matches the packed structs below. Using the per-half key count here
-// breaks distance/ADC alignment when left and right have different key counts.
-static uint8_t split_key_state_payload_size(void) {
-  return (uint8_t)SPLIT_NUM_KEYS_LOCAL_MAX;
-}
+// Protocol v2: KEY/ANALOG payloads are offset-chunked so uint16 distances fit
+// in SPLIT_MAX_PAYLOAD_SIZE. KEY_STATE still fits a full asymmetric half in one
+// frame (39 keys); ANALOG_STATE may require multiple frames (28 keys max).
 
-static uint8_t split_analog_state_payload_size(void) {
-  return (uint8_t)((uint32_t)SPLIT_NUM_KEYS_LOCAL_MAX *
-                   (sizeof(uint16_t) + sizeof(uint8_t)));
-}
-
-_Static_assert(SPLIT_NUM_KEYS_LOCAL_MAX <= SPLIT_MAX_PAYLOAD_SIZE,
-               "Key state payload exceeds SPLIT_MAX_PAYLOAD_SIZE");
-_Static_assert((SPLIT_NUM_KEYS_LOCAL_MAX * (sizeof(uint16_t) + sizeof(uint8_t))) <=
+_Static_assert(1 + SPLIT_KEY_STATE_KEYS_PER_FRAME * sizeof(uint16_t) <=
                    SPLIT_MAX_PAYLOAD_SIZE,
-               "Analog state payload exceeds SPLIT_MAX_PAYLOAD_SIZE");
+               "Key state chunk exceeds SPLIT_MAX_PAYLOAD_SIZE");
+_Static_assert(1 + SPLIT_ANALOG_STATE_KEYS_PER_FRAME * sizeof(split_analog_key_t) <=
+                   SPLIT_MAX_PAYLOAD_SIZE,
+               "Analog state chunk exceeds SPLIT_MAX_PAYLOAD_SIZE");
 
-static void split_build_key_state_payload(split_key_state_payload_t *payload) {
-  // Zero the full MAX-sized struct so unused asymmetric-half slots are not
-  // sent as stack garbage (which also makes the CRC nondeterministic).
+static uint8_t split_key_state_payload_size(uint8_t key_count) {
+  return (uint8_t)(1u + (uint32_t)key_count * sizeof(uint16_t));
+}
+
+static uint8_t split_analog_state_payload_size(uint8_t key_count) {
+  return (uint8_t)(1u + (uint32_t)key_count * sizeof(split_analog_key_t));
+}
+
+static uint8_t
+split_build_key_state_payload(split_key_state_payload_t *payload,
+                              uint8_t offset) {
   memset(payload, 0, sizeof(*payload));
+  if (offset >= num_local_keys)
+    return 0;
 
-  for (uint32_t i = 0; i < num_local_keys; i++) {
-    const uint8_t key = key_offset + i;
+  const uint8_t count = (uint8_t)M_MIN(
+      (uint32_t)(num_local_keys - offset), (uint32_t)SPLIT_KEY_STATE_KEYS_PER_FRAME);
+  payload->offset = offset;
+  for (uint32_t i = 0; i < count; i++) {
+    const uint8_t key =
+        (uint8_t)((uint32_t)key_offset + (uint32_t)offset + i);
     payload->distance[i] = key_matrix[key].distance;
   }
+  return count;
 }
 
 static void
-split_apply_key_state_payload(const split_key_state_payload_t *payload) {
-  for (uint32_t i = 0; i < num_remote_keys; i++) {
-    const uint8_t key = remote_key_offset + i;
+split_apply_key_state_payload(const split_key_state_payload_t *payload,
+                              uint8_t key_count) {
+  if (payload->offset >= num_remote_keys)
+    return;
+  const uint8_t count = (uint8_t)M_MIN(
+      (uint32_t)key_count, (uint32_t)(num_remote_keys - payload->offset));
+  for (uint32_t i = 0; i < count; i++) {
+    const uint8_t key = (uint8_t)((uint32_t)remote_key_offset +
+                                  (uint32_t)payload->offset + i);
     // Configuration writes only reach the USB-connected half, so the slave's
     // local actuation profile may be stale. Evaluate the received distance
     // against the master's authoritative profile.
@@ -266,27 +290,39 @@ split_apply_key_state_payload(const split_key_state_payload_t *payload) {
   }
 }
 
-static void
-split_build_analog_state_payload(split_analog_state_payload_t *payload) {
-  // Zero the full MAX-sized struct so unused asymmetric-half slots are not
-  // sent as stack garbage (which also makes the CRC nondeterministic).
+static uint8_t
+split_build_analog_state_payload(split_analog_state_payload_t *payload,
+                                 uint8_t offset) {
   memset(payload, 0, sizeof(*payload));
+  if (offset >= num_local_keys)
+    return 0;
 
-  for (uint32_t i = 0; i < num_local_keys; i++) {
-    const uint8_t key = key_offset + i;
-    payload->adc_filtered[i] = key_matrix[key].adc_filtered;
-    payload->distance[i] = key_matrix[key].distance;
+  const uint8_t count = (uint8_t)M_MIN(
+      (uint32_t)(num_local_keys - offset),
+      (uint32_t)SPLIT_ANALOG_STATE_KEYS_PER_FRAME);
+  payload->offset = offset;
+  for (uint32_t i = 0; i < count; i++) {
+    const uint8_t key =
+        (uint8_t)((uint32_t)key_offset + (uint32_t)offset + i);
+    payload->keys[i].adc_filtered = key_matrix[key].adc_filtered;
+    payload->keys[i].distance = key_matrix[key].distance;
   }
+  return count;
 }
 
 static void
-split_apply_analog_state_payload(const split_analog_state_payload_t *payload) {
-  for (uint32_t i = 0; i < num_remote_keys; i++) {
-    const uint8_t key = remote_key_offset + i;
-    key_matrix[key].adc_filtered = payload->adc_filtered[i];
-    key_matrix[key].distance = payload->distance[i];
+split_apply_analog_state_payload(const split_analog_state_payload_t *payload,
+                                 uint8_t key_count) {
+  if (payload->offset >= num_remote_keys)
+    return;
+  const uint8_t count = (uint8_t)M_MIN(
+      (uint32_t)key_count, (uint32_t)(num_remote_keys - payload->offset));
+  for (uint32_t i = 0; i < count; i++) {
+    const uint8_t key = (uint8_t)((uint32_t)remote_key_offset +
+                                  (uint32_t)payload->offset + i);
+    key_matrix[key].adc_filtered = payload->keys[i].adc_filtered;
+    key_matrix[key].distance = payload->keys[i].distance;
   }
-  memcpy(&cached_analog_state, payload, sizeof(cached_analog_state));
   analog_state_valid = true;
 }
 
@@ -466,9 +502,14 @@ static void split_master_task(void) {
   // received. Applying KEY_STATE for up to 39 keys is slow enough that the
   // AT32 USART's 1-byte RX FIFO overflows and drops a following POINTING frame.
   split_key_state_payload_t pending_key_state;
+  uint8_t pending_key_count = 0;
   bool have_key_state = false;
-  split_analog_state_payload_t pending_analog_state;
-  bool have_analog_state = false;
+#define SPLIT_ANALOG_MAX_CHUNKS                                                \
+  ((SPLIT_NUM_KEYS_LOCAL_MAX + SPLIT_ANALOG_STATE_KEYS_PER_FRAME - 1) /        \
+   SPLIT_ANALOG_STATE_KEYS_PER_FRAME)
+  split_analog_state_payload_t pending_analog_chunks[SPLIT_ANALOG_MAX_CHUNKS];
+  uint8_t pending_analog_counts[SPLIT_ANALOG_MAX_CHUNKS];
+  uint8_t pending_analog_n = 0;
 #if defined(POINTING_DEVICE_ENABLED)
   split_pointing_payload_t pending_pointing;
   bool have_pointing = false;
@@ -477,12 +518,18 @@ static void split_master_task(void) {
   bool got_key_state = split_receive_frame(&type, payload, &payload_len,
                                            response_timeout);
 
-  if (got_key_state && type == SPLIT_FRAME_KEY_STATE &&
-      payload_len == split_key_state_payload_size()) {
-    memcpy(&pending_key_state, payload, sizeof(pending_key_state));
-    have_key_state = true;
-    split_update_connection(true);
-  } else {
+  if (got_key_state && type == SPLIT_FRAME_KEY_STATE && payload_len >= 1 &&
+      (((uint32_t)payload_len - 1u) % sizeof(uint16_t)) == 0u) {
+    pending_key_count =
+        (uint8_t)(((uint32_t)payload_len - 1u) / sizeof(uint16_t));
+    if (pending_key_count > 0 &&
+        pending_key_count <= SPLIT_KEY_STATE_KEYS_PER_FRAME) {
+      memcpy(&pending_key_state, payload, payload_len);
+      have_key_state = true;
+      split_update_connection(true);
+    }
+  }
+  if (!have_key_state) {
     split_transport_clear();
     split_update_connection(false);
     // The poll already promised a follow-up; still send it so the slave does
@@ -490,36 +537,51 @@ static void split_master_task(void) {
     goto followup;
   }
 
-  // Receive full analog state when requested. Analog is best-effort and must
+  // Receive chunked analog state when requested. Analog is best-effort and must
   // never discard bytes that may belong to a following POINTING frame.
   if (request_analog) {
-    bool got_analog = split_receive_frame(&type, payload, &payload_len,
-                                          response_timeout);
-    // Always advance the analog timer so a failed transfer cannot force analog
-    // requests on every subsequent poll and flood the half-duplex link.
+    uint8_t analog_covered = 0;
     last_analog_sync = timer_read();
-    if (got_analog && type == SPLIT_FRAME_ANALOG_STATE &&
-        payload_len == split_analog_state_payload_size()) {
-      memcpy(&pending_analog_state, payload, sizeof(pending_analog_state));
-      have_analog_state = true;
-    } else if (got_analog && type == SPLIT_FRAME_POINTING &&
-               payload_len == sizeof(split_pointing_payload_t)) {
-      // Analog was lost/skipped; still consume pointing so the exchange stays
-      // aligned and we do not falsely mark the link unhealthy.
-#if defined(POINTING_DEVICE_ENABLED)
-      if (!POINTING_DEVICE_ON_THIS_HALF) {
-        memcpy(&pending_pointing, payload, sizeof(pending_pointing));
-        have_pointing = true;
+    while (analog_covered < num_remote_keys &&
+           pending_analog_n < SPLIT_ANALOG_MAX_CHUNKS) {
+      bool got_analog = split_receive_frame(&type, payload, &payload_len,
+                                            response_timeout);
+      if (!got_analog)
+        break;
+      if (type == SPLIT_FRAME_ANALOG_STATE && payload_len >= 1 &&
+          (((uint32_t)payload_len - 1u) % sizeof(split_analog_key_t)) == 0u) {
+        const uint8_t count = (uint8_t)(((uint32_t)payload_len - 1u) /
+                                        sizeof(split_analog_key_t));
+        if (count == 0 || count > SPLIT_ANALOG_STATE_KEYS_PER_FRAME)
+          break;
+        memcpy(&pending_analog_chunks[pending_analog_n], payload, payload_len);
+        pending_analog_counts[pending_analog_n] = count;
+        const uint8_t chunk_offset = pending_analog_chunks[pending_analog_n].offset;
+        pending_analog_n++;
+        analog_covered = (uint8_t)M_MAX(
+            (uint32_t)analog_covered, (uint32_t)chunk_offset + count);
+        continue;
       }
+      if (type == SPLIT_FRAME_POINTING &&
+          payload_len == sizeof(split_pointing_payload_t)) {
+        // Analog was lost/skipped; still consume pointing so the exchange stays
+        // aligned and we do not falsely mark the link unhealthy.
+#if defined(POINTING_DEVICE_ENABLED)
+        if (!POINTING_DEVICE_ON_THIS_HALF) {
+          memcpy(&pending_pointing, payload, sizeof(pending_pointing));
+          have_pointing = true;
+        }
 #endif
-      goto apply_frames;
+        goto apply_frames;
+      }
+      break;
     }
   }
 
   // Pointing is best-effort. A miss after a good KEY_STATE must not count as a
   // link failure — that regression made the remote half look completely dead.
 #if defined(POINTING_DEVICE_ENABLED)
-  if (!POINTING_DEVICE_ON_THIS_HALF) {
+  if (!have_pointing && !POINTING_DEVICE_ON_THIS_HALF) {
     if (split_receive_frame(&type, payload, &payload_len,
                             SPLIT_CONNECTION_TIMEOUT_MS) &&
         type == SPLIT_FRAME_POINTING &&
@@ -532,9 +594,10 @@ static void split_master_task(void) {
 
 apply_frames:
   if (have_key_state)
-    split_apply_key_state_payload(&pending_key_state);
-  if (have_analog_state)
-    split_apply_analog_state_payload(&pending_analog_state);
+    split_apply_key_state_payload(&pending_key_state, pending_key_count);
+  for (uint8_t i = 0; i < pending_analog_n; i++)
+    split_apply_analog_state_payload(&pending_analog_chunks[i],
+                                     pending_analog_counts[i]);
 #if defined(POINTING_DEVICE_ENABLED)
   if (have_pointing)
     pointing_device_add_remote_delta(pending_pointing.dx, pending_pointing.dy);
@@ -603,27 +666,37 @@ static void split_slave_task(void) {
       expected_followups++;
   }
 
-  // Send key state to master
+  // Send key state to master (single chunk covers current halves)
   split_key_state_payload_t key_payload;
-  split_build_key_state_payload(&key_payload);
-  if (!split_send_frame(SPLIT_FRAME_KEY_STATE, (uint8_t *)&key_payload,
-                        split_key_state_payload_size())) {
+  const uint8_t key_count = split_build_key_state_payload(&key_payload, 0);
+  if (key_count == 0 ||
+      !split_send_frame(SPLIT_FRAME_KEY_STATE, (uint8_t *)&key_payload,
+                        split_key_state_payload_size(key_count))) {
     split_update_connection(false);
     return;
   }
   split_update_connection(true);
 
-  // Send full analog state when requested by the master
+  // Send chunked analog state when requested by the master
   if (request_analog) {
-    split_analog_state_payload_t analog_payload;
-    split_build_analog_state_payload(&analog_payload);
     // Analog is best-effort like on the master side: a failed send must not
     // count as a link error. Keep going so pointing/follow-ups stay aligned
     // with the master's plan.
-    if (split_send_frame(SPLIT_FRAME_ANALOG_STATE, (uint8_t *)&analog_payload,
-                         split_analog_state_payload_size())) {
-      last_analog_sync = timer_read();
+    bool any_analog_sent = false;
+    for (uint8_t offset = 0; offset < num_local_keys;) {
+      split_analog_state_payload_t analog_payload;
+      const uint8_t count =
+          split_build_analog_state_payload(&analog_payload, offset);
+      if (count == 0)
+        break;
+      if (split_send_frame(SPLIT_FRAME_ANALOG_STATE, (uint8_t *)&analog_payload,
+                           split_analog_state_payload_size(count))) {
+        any_analog_sent = true;
+      }
+      offset = (uint8_t)(offset + count);
     }
+    if (any_analog_sent)
+      last_analog_sync = timer_read();
   }
 
   // Send pointing device motion to the master half

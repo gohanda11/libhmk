@@ -26,7 +26,7 @@
 
 // Protocol version. Frames with a mismatched version are rejected so halves
 // running incompatible firmware fail fast instead of misreading payloads.
-#define SPLIT_PROTOCOL_VERSION 1
+#define SPLIT_PROTOCOL_VERSION 2
 
 // Maximum payload size for a single frame
 #define SPLIT_MAX_PAYLOAD_SIZE 128
@@ -38,9 +38,10 @@
 typedef enum {
   // Master -> Slave: poll request (half-duplex)
   SPLIT_FRAME_POLL = 0x00,
-  // Slave -> Master: key distance array
+  // Slave -> Master: key distance array (uint16, chunked with offset)
   SPLIT_FRAME_KEY_STATE = 0x01,
   // Slave -> Master: full analog state for hmkconf compatibility
+  // (adc u16 + distance u16 per key, chunked with offset; max 28 keys/frame)
   SPLIT_FRAME_ANALOG_STATE = 0x02,
   // Master -> Slave: layer state
   SPLIT_FRAME_LAYER_STATE = 0x03,
@@ -48,6 +49,9 @@ typedef enum {
   SPLIT_FRAME_CONTROL = 0x04,
   // Slave -> Master: pointing device motion deltas
   SPLIT_FRAME_POINTING = 0x05,
+  // Master -> Slave: pointing device runtime config relay (F2).
+  // Reserved here for protocol stability; payload implemented by F2 work.
+  SPLIT_FRAME_POINTING_CONFIG = 0x06,
 } split_frame_type_t;
 
 //--------------------------------------------------------------------+
@@ -90,10 +94,10 @@ typedef struct __attribute__((packed)) {
 // Split Payload Structures
 //--------------------------------------------------------------------+
 
-// Key/analog payloads are defined in src/split.c and are always sized to
-// SPLIT_NUM_KEYS_LOCAL_MAX so asymmetric halves (e.g. 30 vs 39) keep a stable
-// on-wire layout:
-//   distance[SPLIT_NUM_KEYS_LOCAL_MAX]
+// Key/analog payloads are defined in src/split.c.
+// Protocol v2 uses offset-chunked frames:
+//   KEY_STATE:   offset u8 + distance u16[] 
+//   ANALOG_STATE: offset u8 + {adc u16, distance u16}[]  (max 28 keys/frame)
 
 typedef struct __attribute__((packed)) {
   uint8_t flags;
