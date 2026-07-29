@@ -41,6 +41,9 @@ static bool auto_mouse_active;
 // True when AML turned the layer on itself (layer was off at activation).
 // Prevents clearing a layer that was already held by MO/TG before AML.
 static bool auto_mouse_clear_on_timeout;
+// Runtime AML enable. Toggled at runtime by SP_AUTO_MOUSE_TOGGLE; defaults to
+// enabled on every boot (the state is not persisted to EEPROM).
+static bool auto_mouse_enabled = true;
 #endif
 
 /**
@@ -365,6 +368,12 @@ void layout_register(uint8_t key, uint8_t keycode) {
     board_enter_bootloader();
     break;
 
+#if defined(POINTING_DEVICE_AUTO_MOUSE_LAYER)
+  case SP_AUTO_MOUSE_TOGGLE:
+    layout_toggle_auto_mouse();
+    break;
+#endif
+
   default:
     break;
   }
@@ -391,6 +400,9 @@ void layout_unregister(uint8_t key, uint8_t keycode) {
 
 #if defined(POINTING_DEVICE_AUTO_MOUSE_LAYER)
 void layout_set_auto_mouse_layer(uint8_t layer) {
+  if (!auto_mouse_enabled)
+    return;
+
   auto_mouse_layer = layer;
   auto_mouse_timeout = timer_read();
   if (!auto_mouse_active) {
@@ -400,6 +412,18 @@ void layout_set_auto_mouse_layer(uint8_t layer) {
   } else {
     // Refresh timeout; keep the real layer bit asserted.
     layout_layer_on(layer);
+  }
+}
+
+void layout_toggle_auto_mouse(void) {
+  auto_mouse_enabled = !auto_mouse_enabled;
+
+  if (!auto_mouse_enabled && auto_mouse_active) {
+    // Turn the layer off immediately instead of waiting for the timeout.
+    if (auto_mouse_clear_on_timeout)
+      layout_layer_off(auto_mouse_layer);
+    auto_mouse_active = false;
+    auto_mouse_clear_on_timeout = false;
   }
 }
 #endif

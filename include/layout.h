@@ -76,3 +76,14 @@ void layout_unregister(uint8_t key, uint8_t keycode);
  * @return None
  */
 void layout_set_auto_mouse_layer(uint8_t layer);
+
+/**
+ * @brief Toggle the auto mouse layer feature on/off
+ *
+ * When toggled off while the auto mouse layer is active, the layer is
+ * deactivated immediately. The state is not persisted and defaults to enabled
+ * on boot.
+ *
+ * @return None
+ */
+void layout_toggle_auto_mouse(void);
