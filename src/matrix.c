@@ -55,8 +55,9 @@ static bitmap_t rapid_trigger_disabled[] = MAKE_BITMAP(NUM_KEYS);
 //--------------------------------------------------------------------+
 // Compensates for reduced ADC swing on a voltage-sagged split half (e.g. when
 // the slave is powered only through a 3.3V/GND/DATA tether). Peak travel is
-// tracked per key and used to stretch distance toward the full 0-255 range.
-// On a healthy half the peak quickly reaches 255 and scaling becomes a no-op.
+// tracked per key and used to stretch distance toward the full 0-TRAVEL_UNITS
+// range. On a healthy half the peak quickly reaches TRAVEL_UNITS and scaling
+// becomes a no-op.
 // Split-only: on non-split keyboards the ADC range is always healthy and the
 // saturation behavior while the peak is still learning would distort the
 // distance curve.
@@ -66,7 +67,8 @@ static bitmap_t rapid_trigger_disabled[] = MAKE_BITMAP(NUM_KEYS);
 #if !defined(MATRIX_DISTANCE_AGC_MIN_PEAK)
 // Do not engage scaling until a key has traveled at least this far. Prevents
 // soft taps from permanently over-amplifying subsequent presses.
-#define MATRIX_DISTANCE_AGC_MIN_PEAK ((uint16_t)(96u * (uint32_t)TRAVEL_UNITS / 255u))
+#define MATRIX_DISTANCE_AGC_MIN_PEAK                                           \
+  ((uint16_t)(96u * (uint32_t)TRAVEL_UNITS / 255u))
 #endif
 
 #if !defined(MATRIX_DISTANCE_AGC_DECAY_MS)

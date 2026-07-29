@@ -97,7 +97,7 @@ typedef struct __attribute__((packed)) {
 
 // Key/analog payloads are defined in src/split.c.
 // Protocol v2 uses offset-chunked frames:
-//   KEY_STATE:   offset u8 + distance u16[] 
+//   KEY_STATE:   offset u8 + distance u16[]
 //   ANALOG_STATE: offset u8 + {adc u16, distance u16}[]  (max 28 keys/frame)
 
 typedef struct __attribute__((packed)) {
