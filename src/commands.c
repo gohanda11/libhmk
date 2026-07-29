@@ -535,7 +535,8 @@ static void command_process(void) {
     const command_in_pointing_config_t *p = &in->pointing_config;
 #if defined(POINTING_DEVICE_ENABLED)
     COMMAND_VERIFY(p->cpi >= PMW3610_MIN_CPI && p->cpi <= PMW3610_MAX_CPI);
-    COMMAND_VERIFY((p->cpi % 100) == 0);
+    // PMW3610 hardware / make.py both require 200 CPI steps.
+    COMMAND_VERIFY((p->cpi % 200) == 0);
 
     pointing_config_t cfg = {
         .enabled = p->enabled != 0,
