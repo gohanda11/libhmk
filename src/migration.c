@@ -471,9 +471,17 @@ bool v1_7_global_config_func(uint8_t *dst, const uint8_t *src) {
 
   // Copy the previous global configuration, then append pointing defaults.
   migration_memcpy(&dst, &src, MIGRATION_V1_6_GLOBAL_CONFIG_SIZE);
-  migration_assign_uint8_t(&dst, true);  // enabled
-  migration_assign_uint8_t(&dst, true);  // auto_mouse_layer_enabled
-  migration_assign_uint16_t(&dst, 0);    // cpi (0 = board default)
+  migration_assign_uint8_t(&dst, true); // enabled
+#if defined(POINTING_DEVICE_AUTO_MOUSE_LAYER)
+  migration_assign_uint8_t(&dst, true); // auto_mouse_layer_enabled
+#else
+  migration_assign_uint8_t(&dst, false);
+#endif
+#if defined(PMW3610_CPI)
+  migration_assign_uint16_t(&dst, PMW3610_CPI);
+#else
+  migration_assign_uint16_t(&dst, 800);
+#endif
 
   return true;
 }

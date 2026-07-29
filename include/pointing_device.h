@@ -16,6 +16,7 @@
 #pragma once
 
 #include "common.h"
+#include "eeconfig.h"
 #include "split.h"
 
 //--------------------------------------------------------------------+
@@ -89,3 +90,36 @@ void pointing_device_restore_local_delta(int16_t dx, int16_t dy);
  * @return None
  */
 void pointing_device_add_remote_delta(int16_t dx, int16_t dy);
+
+#if defined(POINTING_DEVICE_ENABLED)
+/**
+ * @brief Apply pointing configuration locally (sensor + AML)
+ *
+ * Used on boot, by the slave after a split relay, and as part of set_config.
+ * Does not persist to EEPROM and does not relay to the other half.
+ *
+ * @param cfg Pointing configuration
+ *
+ * @return None
+ */
+void pointing_device_apply_local(const pointing_config_t *cfg);
+
+/**
+ * @brief Apply pointing configuration and relay to the sensor half if needed
+ *
+ * Persistence is the caller's responsibility (EECONFIG_WRITE).
+ *
+ * @param cfg Pointing configuration
+ *
+ * @return None
+ */
+void pointing_device_set_config(const pointing_config_t *cfg);
+
+/**
+ * @brief Get the active runtime pointing configuration
+ *
+ * @return Pointer to the runtime configuration
+ */
+const pointing_config_t *pointing_device_get_config(void);
+#endif
+

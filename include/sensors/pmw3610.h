@@ -37,6 +37,7 @@
 #define PMW3610_REG_REST3_RATE 0x20
 #define PMW3610_REG_OBSERVATION 0x2D
 #define PMW3610_REG_POWER_UP_RESET 0x3A
+#define PMW3610_REG_SHUTDOWN 0x3B
 #define PMW3610_REG_SPI_CLK_ON_REQ 0x41
 #define PMW3610_REG_RES_STEP 0x85
 #define PMW3610_REG_SPI_PAGE0 0x7F
@@ -44,6 +45,8 @@
 
 #define PMW3610_PRODUCT_ID 0x3E
 #define PMW3610_POWERUP_CMD_RESET 0x5A
+#define PMW3610_POWERUP_CMD_WAKEUP 0x96
+#define PMW3610_SHUTDOWN_ENABLE 0xE7
 #define PMW3610_SPI_CLOCK_CMD_ENABLE 0xBA
 #define PMW3610_SPI_CLOCK_CMD_DISABLE 0xB5
 #define PMW3610_SPI_WRITE_BIT 0x80
@@ -97,3 +100,27 @@ bool pmw3610_read_motion(int16_t *dx, int16_t *dy);
  * @return None
  */
 void pmw3610_get_info(pmw3610_info_t *info);
+
+/**
+ * @brief Set the PMW3610 CPI (counts per inch)
+ *
+ * CPI is quantized to steps of 200. Values outside
+ * [PMW3610_MIN_CPI, PMW3610_MAX_CPI] are clamped.
+ *
+ * @param cpi Desired CPI
+ *
+ * @return None
+ */
+void pmw3610_set_cpi(uint16_t cpi);
+
+/**
+ * @brief Enable or disable the PMW3610 sensor
+ *
+ * When disabled the sensor enters shutdown mode. Enabling wakes it with a
+ * power-up wakeup command. Re-apply CPI after enabling if needed.
+ *
+ * @param enabled true to wake the sensor, false to shut it down
+ *
+ * @return None
+ */
+void pmw3610_set_enabled(bool enabled);

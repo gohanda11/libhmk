@@ -128,7 +128,12 @@ static uint8_t pmw3610_read_reg(uint8_t reg) {
   return value;
 }
 
-static void pmw3610_set_cpi(uint16_t cpi) {
+void pmw3610_set_cpi(uint16_t cpi) {
+  if (cpi < PMW3610_MIN_CPI)
+    cpi = PMW3610_MIN_CPI;
+  else if (cpi > PMW3610_MAX_CPI)
+    cpi = PMW3610_MAX_CPI;
+
   uint8_t value = (uint8_t)(cpi / 200);
 
 #if defined(PMW3610_SWAP_XY)
@@ -146,6 +151,20 @@ static void pmw3610_set_cpi(uint16_t cpi) {
   pmw3610_write_reg_internal(PMW3610_REG_RES_STEP, value);
   pmw3610_write_reg_internal(PMW3610_REG_SPI_PAGE0, 0x00);
   pmw3610_spi_clock_off();
+}
+
+void pmw3610_set_enabled(bool enabled) {
+  if (!init_ok)
+    return;
+
+  if (enabled) {
+    pmw3610_write_reg(PMW3610_REG_POWER_UP_RESET, PMW3610_POWERUP_CMD_WAKEUP);
+    timer_delay(10);
+    // Restore the normal awake performance setting after wakeup.
+    pmw3610_write_reg(PMW3610_REG_PERFORMANCE, 0x0D);
+  } else {
+    pmw3610_write_reg(PMW3610_REG_SHUTDOWN, PMW3610_SHUTDOWN_ENABLE);
+  }
 }
 
 static void pmw3610_read_burst(uint8_t reg, uint8_t *buf, uint8_t len) {

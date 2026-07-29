@@ -17,9 +17,11 @@
 
 #if defined(POINTING_DEVICE_ENABLED)
 
+#include "eeconfig.h"
 #include "hid.h"
 #include "layout.h"
 #include "sensors/pmw3610.h"
+#include "split.h"
 
 //--------------------------------------------------------------------+
 // State
@@ -31,10 +33,25 @@ static int16_t remote_dx;
 static int16_t remote_dy;
 static bool pmw3610_initialized;
 static uint8_t init_attempts;
+static pointing_config_t runtime_config;
+static bool runtime_config_valid;
 
 //--------------------------------------------------------------------+
 // Helpers
 //--------------------------------------------------------------------+
+
+static uint16_t pointing_device_effective_cpi(uint16_t cpi) {
+  if (cpi == 0)
+    return DEFAULT_POINTING_CPI;
+  return cpi;
+}
+
+static void pointing_device_clear_deltas(void) {
+  local_dx = 0;
+  local_dy = 0;
+  remote_dx = 0;
+  remote_dy = 0;
+}
 
 static bool pointing_device_init_sensor(void) {
   for (uint8_t attempt = 0; attempt < 3; attempt++) {
@@ -42,6 +59,21 @@ static bool pointing_device_init_sensor(void) {
       return true;
   }
   return false;
+}
+
+static void pointing_device_apply_sensor_config(void) {
+  if (!POINTING_DEVICE_ON_THIS_HALF || !pmw3610_initialized)
+    return;
+
+  pmw3610_set_enabled(runtime_config.enabled);
+  if (runtime_config.enabled)
+    pmw3610_set_cpi(pointing_device_effective_cpi(runtime_config.cpi));
+}
+
+static void pointing_device_apply_layout_config(void) {
+#if defined(POINTING_DEVICE_AUTO_MOUSE_LAYER)
+  layout_set_auto_mouse_enabled(runtime_config.auto_mouse_layer_enabled);
+#endif
 }
 
 static void pointing_device_send_hid(int16_t dx, int16_t dy) {
@@ -64,12 +96,50 @@ static void pointing_device_send_hid(int16_t dx, int16_t dy) {
 //--------------------------------------------------------------------+
 
 void pointing_device_init(void) {
-  local_dx = 0;
-  local_dy = 0;
-  remote_dx = 0;
-  remote_dy = 0;
+  pointing_device_clear_deltas();
   pmw3610_initialized = false;
   init_attempts = 0;
+  runtime_config = eeconfig->pointing_config;
+  runtime_config.cpi = pointing_device_effective_cpi(runtime_config.cpi);
+  runtime_config_valid = true;
+  pointing_device_apply_layout_config();
+}
+
+void pointing_device_apply_local(const pointing_config_t *cfg) {
+  if (cfg == NULL)
+    return;
+
+  runtime_config = *cfg;
+  runtime_config.cpi = pointing_device_effective_cpi(runtime_config.cpi);
+  runtime_config_valid = true;
+  pointing_device_apply_layout_config();
+  pointing_device_apply_sensor_config();
+
+  if (!runtime_config.enabled)
+    pointing_device_clear_deltas();
+}
+
+void pointing_device_set_config(const pointing_config_t *cfg) {
+  pointing_device_apply_local(cfg);
+
+#if defined(SPLIT_KEYBOARD)
+  // Persist happens in the command handler. Relay runtime fields to the slave
+  // when the sensor lives on the opposite half.
+  if (!POINTING_DEVICE_ON_THIS_HALF) {
+    split_send_pointing_config(runtime_config.enabled,
+                               runtime_config.auto_mouse_layer_enabled,
+                               runtime_config.cpi);
+  }
+#endif
+}
+
+const pointing_config_t *pointing_device_get_config(void) {
+  if (!runtime_config_valid) {
+    runtime_config = eeconfig->pointing_config;
+    runtime_config.cpi = pointing_device_effective_cpi(runtime_config.cpi);
+    runtime_config_valid = true;
+  }
+  return &runtime_config;
 }
 
 void pointing_device_task(void) {
@@ -77,10 +147,17 @@ void pointing_device_task(void) {
     if (!pmw3610_initialized && init_attempts < 3) {
       init_attempts++;
       pmw3610_initialized = pointing_device_init_sensor();
+      if (pmw3610_initialized)
+        pointing_device_apply_sensor_config();
     }
 
     if (!pmw3610_initialized)
       return;
+
+    if (!runtime_config.enabled) {
+      pointing_device_clear_deltas();
+      return;
+    }
 
     int16_t dx = 0;
     int16_t dy = 0;
@@ -89,6 +166,11 @@ void pointing_device_task(void) {
       local_dx += dx;
       local_dy += dy;
     }
+  }
+
+  if (!runtime_config.enabled) {
+    pointing_device_clear_deltas();
+    return;
   }
 
 #if defined(SPLIT_KEYBOARD)
@@ -121,6 +203,14 @@ void pointing_device_task(void) {
 }
 
 void pointing_device_get_local_delta(int16_t *dx, int16_t *dy) {
+  if (!runtime_config.enabled) {
+    *dx = 0;
+    *dy = 0;
+    local_dx = 0;
+    local_dy = 0;
+    return;
+  }
+
   *dx = local_dx;
   *dy = local_dy;
   local_dx = 0;
@@ -128,11 +218,15 @@ void pointing_device_get_local_delta(int16_t *dx, int16_t *dy) {
 }
 
 void pointing_device_restore_local_delta(int16_t dx, int16_t dy) {
+  if (!runtime_config.enabled)
+    return;
   local_dx += dx;
   local_dy += dy;
 }
 
 void pointing_device_add_remote_delta(int16_t dx, int16_t dy) {
+  if (!runtime_config.enabled)
+    return;
   remote_dx += dx;
   remote_dy += dy;
 }

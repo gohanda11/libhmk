@@ -172,13 +172,29 @@ extern const eeconfig_t *eeconfig;
 #define DEFAULT_SPLIT_HANDEDNESS 0
 #endif
 
+#if !defined(DEFAULT_POINTING_CPI)
+#if defined(PMW3610_CPI)
+#define DEFAULT_POINTING_CPI PMW3610_CPI
+#else
+#define DEFAULT_POINTING_CPI 800
+#endif
+#endif
+
+#if !defined(DEFAULT_POINTING_AUTO_MOUSE_LAYER_ENABLED)
+#if defined(POINTING_DEVICE_AUTO_MOUSE_LAYER)
+#define DEFAULT_POINTING_AUTO_MOUSE_LAYER_ENABLED true
+#else
+#define DEFAULT_POINTING_AUTO_MOUSE_LAYER_ENABLED false
+#endif
+#endif
+
 #if !defined(DEFAULT_POINTING_CONFIG)
-// Default pointing configuration. CPI falls back to 0 (board/driver default).
+// Default pointing configuration follows keyboard.json build-time values.
 #define DEFAULT_POINTING_CONFIG                                                \
   {                                                                            \
       .enabled = true,                                                         \
-      .auto_mouse_layer_enabled = true,                                        \
-      .cpi = 0,                                                                \
+      .auto_mouse_layer_enabled = DEFAULT_POINTING_AUTO_MOUSE_LAYER_ENABLED,   \
+      .cpi = DEFAULT_POINTING_CPI,                                             \
   }
 #endif
 
