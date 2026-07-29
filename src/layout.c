@@ -23,6 +23,9 @@
 #include "keycodes.h"
 #include "lib/bitmap.h"
 #include "matrix.h"
+#if defined(POINTING_DEVICE_ENABLED)
+#include "pointing_device.h"
+#endif
 #include "split.h"
 #include "xinput.h"
 
@@ -41,8 +44,8 @@ static bool auto_mouse_active;
 // True when AML turned the layer on itself (layer was off at activation).
 // Prevents clearing a layer that was already held by MO/TG before AML.
 static bool auto_mouse_clear_on_timeout;
-// Runtime AML enable. Toggled at runtime by SP_AUTO_MOUSE_TOGGLE; defaults to
-// enabled on every boot (the state is not persisted to EEPROM).
+// Runtime AML enable. Seeded from eeconfig.pointing_config on init, toggled by
+// SP_AUTO_MOUSE_TOGGLE / SET_POINTING_CONFIG, and gated below.
 static bool auto_mouse_enabled = true;
 #endif
 
@@ -127,7 +130,12 @@ static uint8_t advanced_key_indices[NUM_LAYERS][NUM_KEYS];
 // Same as `active_keycodes` but for advanced keys
 static uint8_t active_advanced_keys[NUM_KEYS];
 
-void layout_init(void) { layout_load_advanced_keys(); }
+void layout_init(void) {
+#if defined(POINTING_DEVICE_AUTO_MOUSE_LAYER)
+  auto_mouse_enabled = eeconfig->pointing_config.auto_mouse_layer_enabled;
+#endif
+  layout_load_advanced_keys();
+}
 
 void layout_load_advanced_keys(void) {
   advanced_key_init();
@@ -401,8 +409,21 @@ void layout_unregister(uint8_t key, uint8_t keycode) {
 }
 
 #if defined(POINTING_DEVICE_AUTO_MOUSE_LAYER)
+void layout_set_auto_mouse_enabled(bool enabled) {
+  auto_mouse_enabled = enabled;
+
+  if (!auto_mouse_enabled && auto_mouse_active) {
+    // Turn the layer off immediately instead of waiting for the timeout.
+    if (auto_mouse_clear_on_timeout)
+      layout_layer_off(auto_mouse_layer);
+    auto_mouse_active = false;
+    auto_mouse_clear_on_timeout = false;
+  }
+}
+
 void layout_set_auto_mouse_layer(uint8_t layer) {
-  if (!auto_mouse_enabled)
+  // Gate on both the runtime toggle and the persisted pointing config flag.
+  if (!auto_mouse_enabled || !eeconfig->pointing_config.auto_mouse_layer_enabled)
     return;
 
   auto_mouse_layer = layer;
@@ -418,14 +439,16 @@ void layout_set_auto_mouse_layer(uint8_t layer) {
 }
 
 void layout_toggle_auto_mouse(void) {
-  auto_mouse_enabled = !auto_mouse_enabled;
-
-  if (!auto_mouse_enabled && auto_mouse_active) {
-    // Turn the layer off immediately instead of waiting for the timeout.
-    if (auto_mouse_clear_on_timeout)
-      layout_layer_off(auto_mouse_layer);
-    auto_mouse_active = false;
-    auto_mouse_clear_on_timeout = false;
-  }
+  const bool enabled = !auto_mouse_enabled;
+#if defined(POINTING_DEVICE_ENABLED)
+  pointing_config_t cfg = *pointing_device_get_config();
+  cfg.auto_mouse_layer_enabled = enabled;
+  if (EECONFIG_WRITE(pointing_config, &cfg))
+    pointing_device_set_config(&cfg);
+  else
+    layout_set_auto_mouse_enabled(enabled);
+#else
+  layout_set_auto_mouse_enabled(enabled);
+#endif
 }
 #endif

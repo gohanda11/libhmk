@@ -44,7 +44,8 @@ typedef enum {
   COMMAND_POINTING_DEVICE_INFO,
   // Device-band U16 live distance (calibration UI)
   COMMAND_ANALOG_INFO_U16 = 18,
-  // 19/20 reserved for GET/SET_POINTING_CONFIG (F2)
+  COMMAND_GET_POINTING_CONFIG = 19,
+  COMMAND_SET_POINTING_CONFIG = 20,
 
   COMMAND_GET_KEYMAP = 128,
   COMMAND_SET_KEYMAP,
@@ -102,6 +103,12 @@ typedef struct __attribute__((packed)) {
 typedef struct __attribute__((packed)) {
   uint8_t handedness;
 } command_in_split_handedness_t;
+
+typedef struct __attribute__((packed)) {
+  uint8_t enabled;
+  uint8_t auto_mouse_layer_enabled;
+  uint16_t cpi;
+} command_in_pointing_config_t;
 
 typedef struct __attribute__((packed)) {
   uint8_t profile;
@@ -181,6 +188,7 @@ typedef struct __attribute__((packed)) {
     command_in_duplicate_profile_t duplicate_profile;
     command_in_metadata_t metadata;
     command_in_split_handedness_t split_handedness;
+    command_in_pointing_config_t pointing_config;
 
     command_in_keymap_t keymap;
     command_in_actuation_map_t actuation_map;
@@ -223,6 +231,14 @@ typedef struct __attribute__((packed)) {
 } command_out_pointing_device_info_t;
 
 typedef struct __attribute__((packed)) {
+  uint8_t supported;
+  uint8_t side;
+  uint8_t enabled;
+  uint8_t auto_mouse_layer_enabled;
+  uint16_t cpi;
+} command_out_pointing_config_t;
+
+typedef struct __attribute__((packed)) {
   // Number of valid bytes in `data`
   uint8_t len;
   uint8_t data[COMMAND_GET_STAGED_PROFILE_BYTES_PER_PACKET];
@@ -240,6 +256,8 @@ typedef struct __attribute__((packed)) {
     command_out_analog_info_u16_t analog_info_u16[15];
     // For `COMMAND_POINTING_DEVICE_INFO`
     command_out_pointing_device_info_t pointing_device_info;
+    // For `COMMAND_GET_POINTING_CONFIG`
+    command_out_pointing_config_t pointing_config;
     // For `COMMAND_GET_CALIBRATION`
     eeconfig_calibration_t calibration;
     // For `COMMAND_GET_PROFILE`

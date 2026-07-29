@@ -20,6 +20,7 @@
 #include "layout.h"
 #include "matrix.h"
 #include "metadata.h"
+#include "pointing_device.h"
 #include "sensors/pmw3610.h"
 #include "split.h"
 #include "split_protocol.h"
@@ -339,6 +340,9 @@ static void command_process(void) {
     advanced_key_clear();
     success = eeconfig_reset();
     layout_load_advanced_keys();
+#if defined(POINTING_DEVICE_ENABLED)
+    pointing_device_set_config(&eeconfig->pointing_config);
+#endif
     break;
   }
   case COMMAND_RECALIBRATE: {
@@ -499,6 +503,52 @@ static void command_process(void) {
     out->pointing_device_info.init_ok = info.init_ok ? 1 : 0;
 #else
     success = false;
+#endif
+    break;
+  }
+  case COMMAND_GET_POINTING_CONFIG: {
+#if defined(POINTING_DEVICE_ENABLED)
+    const pointing_config_t *cfg = pointing_device_get_config();
+    out->pointing_config.supported = 1;
+#if defined(POINTING_DEVICE_SIDE_LEFT)
+    out->pointing_config.side = 1;
+#elif defined(POINTING_DEVICE_SIDE_RIGHT)
+    out->pointing_config.side = 2;
+#else
+    out->pointing_config.side = 0;
+#endif
+    out->pointing_config.enabled = cfg->enabled ? 1 : 0;
+    out->pointing_config.auto_mouse_layer_enabled =
+        cfg->auto_mouse_layer_enabled ? 1 : 0;
+    out->pointing_config.cpi = cfg->cpi;
+#else
+    out->pointing_config.supported = 0;
+    out->pointing_config.side = 0;
+    out->pointing_config.enabled = eeconfig->pointing_config.enabled ? 1 : 0;
+    out->pointing_config.auto_mouse_layer_enabled =
+        eeconfig->pointing_config.auto_mouse_layer_enabled ? 1 : 0;
+    out->pointing_config.cpi = eeconfig->pointing_config.cpi;
+#endif
+    break;
+  }
+  case COMMAND_SET_POINTING_CONFIG: {
+    const command_in_pointing_config_t *p = &in->pointing_config;
+#if defined(POINTING_DEVICE_ENABLED)
+    COMMAND_VERIFY(p->cpi >= PMW3610_MIN_CPI && p->cpi <= PMW3610_MAX_CPI);
+    COMMAND_VERIFY((p->cpi % 100) == 0);
+
+    pointing_config_t cfg = {
+        .enabled = p->enabled != 0,
+        .auto_mouse_layer_enabled = p->auto_mouse_layer_enabled != 0,
+        .cpi = p->cpi,
+    };
+    success = EECONFIG_WRITE(pointing_config, &cfg);
+    if (success)
+      pointing_device_set_config(&cfg);
+#else
+    // Unsupported keyboards accept SET as a no-op success.
+    (void)p;
+    success = true;
 #endif
     break;
   }

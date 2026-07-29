@@ -78,11 +78,24 @@ void layout_unregister(uint8_t key, uint8_t keycode);
 void layout_set_auto_mouse_layer(uint8_t layer);
 
 /**
+ * @brief Enable or disable the auto mouse layer feature
+ *
+ * When disabled while the auto mouse layer is active, the layer is deactivated
+ * immediately. The persistent source of truth is eeconfig.pointing_config;
+ * this updates the runtime gate used by layout_set_auto_mouse_layer().
+ *
+ * @param enabled true to allow automatic layer activation
+ *
+ * @return None
+ */
+void layout_set_auto_mouse_enabled(bool enabled);
+
+/**
  * @brief Toggle the auto mouse layer feature on/off
  *
  * When toggled off while the auto mouse layer is active, the layer is
- * deactivated immediately. The state is not persisted and defaults to enabled
- * on boot.
+ * deactivated immediately. Persistence / split relay are handled by the
+ * pointing-device configuration path when available.
  *
  * @return None
  */
