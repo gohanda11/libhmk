@@ -168,6 +168,22 @@ bool split_is_connected(void);
 bool split_send_control_command(uint8_t command);
 
 /**
+ * @brief Queue a pointing-config frame for the slave half
+ *
+ * Master only. The frame is delivered as a poll follow-up, same as control
+ * commands. Used when the pointing sensor is mounted on the slave half.
+ *
+ * @param enabled Sensor enable flag
+ * @param auto_mouse_layer_enabled Auto mouse layer enable flag
+ * @param cpi CPI value
+ *
+ * @return true if queued, false otherwise
+ */
+bool split_send_pointing_config(uint8_t enabled,
+                                uint8_t auto_mouse_layer_enabled,
+                                uint16_t cpi);
+
+/**
  * @brief Force one master split transaction
  *
  * Used to deliver a pending control/layer frame before the caller blocks.

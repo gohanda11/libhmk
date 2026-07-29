@@ -115,6 +115,11 @@ static uint32_t last_poll_time;
 static bool analog_state_valid;
 
 static uint8_t pending_control_command;
+#if defined(POINTING_DEVICE_ENABLED)
+static bool pending_pointing_config;
+static split_pointing_config_payload_t pending_pointing_config_payload;
+static bool was_connected;
+#endif
 static bool slave_recalibrate_pending;
 // After sending RECALIBRATE to the slave, pause polling while it blocks in
 // matrix_recalibrate() so connection_errors do not accumulate and clear keys.
@@ -155,6 +160,10 @@ static void split_promote_to_master(void) {
   poll_pause_ms = 0;
   analog_state_valid = false;
   pending_control_command = 0;
+#if defined(POINTING_DEVICE_ENABLED)
+  pending_pointing_config = false;
+  was_connected = false;
+#endif
   slave_recalibrate_pending = false;
   local_layer_mask = 0;
   local_default_layer = 0;
@@ -426,9 +435,30 @@ static void split_clear_remote_keys(void) {
   }
 }
 
+#if defined(POINTING_DEVICE_ENABLED)
+static void split_queue_pointing_config_from_eeconfig(void) {
+  if (POINTING_DEVICE_ON_THIS_HALF)
+    return;
+
+  const pointing_config_t *cfg = pointing_device_get_config();
+  pending_pointing_config_payload.enabled = cfg->enabled ? 1 : 0;
+  pending_pointing_config_payload.auto_mouse_layer_enabled =
+      cfg->auto_mouse_layer_enabled ? 1 : 0;
+  pending_pointing_config_payload.cpi = cfg->cpi;
+  pending_pointing_config = true;
+}
+#endif
+
 static void split_update_connection(bool success) {
   if (success) {
     connection_errors = 0;
+#if defined(POINTING_DEVICE_ENABLED)
+    // Re-push pointing config whenever the slave link comes back so a late
+    // slave boot or reconnect picks up the master's EEPROM settings.
+    if (is_master && !was_connected)
+      split_queue_pointing_config_from_eeconfig();
+    was_connected = true;
+#endif
     connected = true;
   } else {
     if (connection_errors < UINT8_MAX)
@@ -437,6 +467,9 @@ static void split_update_connection(bool success) {
       if (connected && is_master)
         split_clear_remote_keys();
       connected = false;
+#if defined(POINTING_DEVICE_ENABLED)
+      was_connected = false;
+#endif
     }
   }
 }
@@ -476,6 +509,11 @@ static void split_master_task(void) {
   // slave, ate the next POLL under continuous typing.
   const bool send_layer = layer_state_changed;
   const bool send_control = pending_control_command != 0;
+#if defined(POINTING_DEVICE_ENABLED)
+  const bool send_pointing_config = pending_pointing_config;
+#else
+  const bool send_pointing_config = false;
+#endif
 
   split_poll_payload_t poll_payload = {.flags = 0};
   if (request_analog)
@@ -484,6 +522,8 @@ static void split_master_task(void) {
     poll_payload.flags |= SPLIT_POLL_FLAG_FOLLOWUP_LAYER;
   if (send_control)
     poll_payload.flags |= SPLIT_POLL_FLAG_FOLLOWUP_CONTROL;
+  if (send_pointing_config)
+    poll_payload.flags |= SPLIT_POLL_FLAG_FOLLOWUP_POINTING_CONFIG;
 
   if (!split_send_frame(SPLIT_FRAME_POLL, (uint8_t *)&poll_payload,
                         sizeof(poll_payload))) {
@@ -632,6 +672,16 @@ followup:
     }
   }
 
+#if defined(POINTING_DEVICE_ENABLED)
+  if (send_pointing_config) {
+    if (split_send_frame(SPLIT_FRAME_POINTING_CONFIG,
+                         (uint8_t *)&pending_pointing_config_payload,
+                         sizeof(pending_pointing_config_payload))) {
+      pending_pointing_config = false;
+    }
+  }
+#endif
+
   last_poll_time = timer_read();
 }
 
@@ -663,6 +713,8 @@ static void split_slave_task(void) {
     if (poll->flags & SPLIT_POLL_FLAG_FOLLOWUP_LAYER)
       expected_followups++;
     if (poll->flags & SPLIT_POLL_FLAG_FOLLOWUP_CONTROL)
+      expected_followups++;
+    if (poll->flags & SPLIT_POLL_FLAG_FOLLOWUP_POINTING_CONFIG)
       expected_followups++;
   }
 
@@ -754,6 +806,24 @@ static void split_slave_task(void) {
         remaining--;
         break;
 
+#if defined(POINTING_DEVICE_ENABLED)
+      case SPLIT_FRAME_POINTING_CONFIG:
+        if (payload_len == sizeof(split_pointing_config_payload_t)) {
+          const split_pointing_config_payload_t *cfg_payload =
+              (const split_pointing_config_payload_t *)payload;
+          pointing_config_t cfg = {
+              .enabled = cfg_payload->enabled != 0,
+              .auto_mouse_layer_enabled =
+                  cfg_payload->auto_mouse_layer_enabled != 0,
+              .cpi = cfg_payload->cpi,
+          };
+          // Slave applies sensor settings only; EEPROM lives on the master.
+          pointing_device_apply_local(&cfg);
+        }
+        remaining--;
+        break;
+#endif
+
       default:
         // Unexpected frame (e.g. next POLL). Stop waiting so we do not dig a
         // deeper desync hole; the next slave task can resynchronize.
@@ -794,6 +864,10 @@ void split_pre_init(void) {
   last_poll_time = 0;
   analog_state_valid = false;
   pending_control_command = 0;
+#if defined(POINTING_DEVICE_ENABLED)
+  pending_pointing_config = false;
+  was_connected = false;
+#endif
   slave_recalibrate_pending = false;
   poll_pause_start = 0;
   poll_pause_ms = 0;
@@ -874,6 +948,27 @@ bool split_send_control_command(uint8_t command) {
 
   pending_control_command = command;
   return true;
+}
+
+bool split_send_pointing_config(uint8_t enabled,
+                                uint8_t auto_mouse_layer_enabled,
+                                uint16_t cpi) {
+#if defined(POINTING_DEVICE_ENABLED)
+  if (!is_master)
+    return false;
+
+  pending_pointing_config_payload.enabled = enabled ? 1 : 0;
+  pending_pointing_config_payload.auto_mouse_layer_enabled =
+      auto_mouse_layer_enabled ? 1 : 0;
+  pending_pointing_config_payload.cpi = cpi;
+  pending_pointing_config = true;
+  return true;
+#else
+  (void)enabled;
+  (void)auto_mouse_layer_enabled;
+  (void)cpi;
+  return false;
+#endif
 }
 
 void split_calibration_idle(void) {

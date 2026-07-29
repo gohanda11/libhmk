@@ -49,8 +49,7 @@ typedef enum {
   SPLIT_FRAME_CONTROL = 0x04,
   // Slave -> Master: pointing device motion deltas
   SPLIT_FRAME_POINTING = 0x05,
-  // Master -> Slave: pointing device runtime config relay (F2).
-  // Reserved here for protocol stability; payload implemented by F2 work.
+  // Master -> Slave: pointing device runtime config relay
   SPLIT_FRAME_POINTING_CONFIG = 0x06,
 } split_frame_type_t;
 
@@ -65,6 +64,8 @@ typedef enum {
   SPLIT_POLL_FLAG_FOLLOWUP_LAYER = 0x02,
   // Master will send a control frame after the slave response
   SPLIT_POLL_FLAG_FOLLOWUP_CONTROL = 0x04,
+  // Master will send a pointing-config frame after the slave response
+  SPLIT_POLL_FLAG_FOLLOWUP_POINTING_CONFIG = 0x08,
 } split_poll_flags_t;
 
 //--------------------------------------------------------------------+
@@ -116,6 +117,12 @@ typedef struct __attribute__((packed)) {
   int16_t dx;
   int16_t dy;
 } split_pointing_payload_t;
+
+typedef struct __attribute__((packed)) {
+  uint8_t enabled;
+  uint8_t auto_mouse_layer_enabled;
+  uint16_t cpi;
+} split_pointing_config_payload_t;
 
 //--------------------------------------------------------------------+
 // Split Protocol API
