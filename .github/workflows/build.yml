@@ -95,7 +95,7 @@ jobs:
 
   publish-firmware:
     name: Publish Firmware to firmware Branch
-    if: github.ref_name == 'split'
+    if: github.ref_name == 'main'
     needs: build
     runs-on: ubuntu-latest
     permissions:
@@ -150,14 +150,14 @@ jobs:
                       "keyboard": name,
                       "url": f"https://raw.githubusercontent.com/${{ github.repository }}/firmware/{name}/firmware.bin",
                       "size": size,
-                      "branch": "split",
+                      "branch": "main",
                       "commit": "${{ github.sha }}",
                       "built_at": datetime.now(timezone.utc).isoformat()
                   })
 
           manifest = {
               "repository": "${{ github.repository }}",
-              "branch": "split",
+              "branch": "main",
               "commit": "${{ github.sha }}",
               "built_at": datetime.now(timezone.utc).isoformat(),
               "firmwares": keyboards
@@ -171,7 +171,7 @@ jobs:
         run: |
           cd firmware-repo
           git add -A
-          git commit -m "Update firmware from split @ ${{ github.sha }}" || true
+          git commit -m "Update firmware from main @ ${{ github.sha }}" || true
           git push origin firmware
 
   release:
