@@ -24,6 +24,11 @@
 
 static advanced_key_state_t ak_states[NUM_ADVANCED_KEYS];
 
+static void advanced_key_null_bind_reset_state(ak_state_null_bind_t *state) {
+  state->is_pressed[0] = state->is_pressed[1] = false;
+  state->keycodes[0] = state->keycodes[1] = KC_NO;
+}
+
 static void advanced_key_null_bind(const advanced_key_event_t *event) {
   const null_bind_t *null_bind =
       &CURRENT_PROFILE.advanced_keys[event->ak_index].null_bind;
@@ -104,6 +109,13 @@ static void advanced_key_null_bind(const advanced_key_event_t *event) {
   }
 }
 
+static void advanced_key_dynamic_keystroke_reset_state(
+    ak_state_dynamic_keystroke_t *state) {
+  for (uint32_t i = 0; i < NUM_DYNAMIC_KEYSTROKE_MAX_BINDINGS; i++)
+    state->is_pressed[i] = false;
+  state->is_bottomed_out = false;
+}
+
 static void advanced_key_dynamic_keystroke(const advanced_key_event_t *event) {
   static deferred_action_t deferred_action = {0};
 
@@ -130,7 +142,7 @@ static void advanced_key_dynamic_keystroke(const advanced_key_event_t *event) {
 
   // Disable Rapid Trigger when the key is bound with Dynamic Keystroke
   matrix_disable_rapid_trigger(event->key, event_type != AK_EVENT_TYPE_RELEASE);
-  for (uint32_t i = 0; i < 4; i++) {
+  for (uint32_t i = 0; i < NUM_DYNAMIC_KEYSTROKE_MAX_BINDINGS; i++) {
     const uint8_t keycode = dks->keycodes[i];
     // We arrange the event types so that we can use the event type as an index
     // to the bitmap.
@@ -160,6 +172,11 @@ static void advanced_key_dynamic_keystroke(const advanced_key_event_t *event) {
                               (action == DKS_ACTION_PRESS));
     }
   }
+}
+
+static void advanced_key_tap_hold_reset_state(ak_state_tap_hold_t *state) {
+  state->since = 0;
+  state->stage = TAP_HOLD_STAGE_NONE;
 }
 
 static void advanced_key_tap_hold(const advanced_key_event_t *event) {
@@ -196,6 +213,12 @@ static void advanced_key_tap_hold(const advanced_key_event_t *event) {
   }
 }
 
+static void advanced_key_toggle_reset_state(ak_state_toggle_t *state) {
+  state->since = 0;
+  state->stage = TOGGLE_STAGE_NONE;
+  state->is_toggled = false;
+}
+
 static void advanced_key_toggle(const advanced_key_event_t *event) {
   const toggle_t *toggle =
       &CURRENT_PROFILE.advanced_keys[event->ak_index].toggle;
@@ -224,13 +247,139 @@ static void advanced_key_toggle(const advanced_key_event_t *event) {
   }
 }
 
-void advanced_key_init(void) {}
+static void advanced_key_macro_reset_state(ak_state_macro_t *state) {
+  state->since = 0;
+  state->deferred_tap_ticks = 0;
+  state->current_node = MACRO_NODE_NONE;
+  state->num_active_keycodes = 0;
+}
+
+static void advanced_key_macro_add_active_keycode(ak_state_macro_t *state,
+                                                  uint8_t keycode) {
+  if (keycode == KC_NO ||
+      state->num_active_keycodes >= MAX_MACRO_ACTIVE_KEYCODES)
+    return;
+
+  for (uint32_t i = 0; i < state->num_active_keycodes; i++) {
+    if (state->active_keycodes[i] == keycode)
+      // Keycode is already active
+      return;
+  }
+
+  state->active_keycodes[state->num_active_keycodes] = keycode;
+  state->num_active_keycodes++;
+}
+
+static void advanced_key_macro_remove_active_keycode(ak_state_macro_t *state,
+                                                     uint8_t keycode) {
+  for (uint32_t i = 0; i < state->num_active_keycodes; i++) {
+    if (state->active_keycodes[i] == keycode) {
+      memmove(state->active_keycodes + i, state->active_keycodes + i + 1,
+              sizeof(uint8_t) * (state->num_active_keycodes - i - 1));
+      state->num_active_keycodes--;
+      break;
+    }
+  }
+}
+
+static void advanced_key_macro_stop(ak_state_macro_t *state, uint8_t key) {
+  for (uint32_t i = 0; i < state->num_active_keycodes; i++)
+    layout_unregister(key, state->active_keycodes[i]);
+
+  advanced_key_macro_reset_state(state);
+}
+
+static void advanced_key_macro_run_step(ak_state_macro_t *state, uint8_t key,
+                                        macro_node_id_t node_id) {
+  if (node_id == MACRO_NODE_NONE || node_id >= NUM_MACRO_NODES) {
+    state->current_node = MACRO_NODE_NONE;
+    return;
+  }
+
+  const macro_node_t *node = &CURRENT_PROFILE.macros[node_id];
+  state->current_node = node_id;
+  state->since = timer_read();
+
+  switch (node->action) {
+  case MACRO_ACTION_PRESS:
+    layout_register(key, node->keycode);
+    advanced_key_macro_add_active_keycode(state, node->keycode);
+    break;
+
+  case MACRO_ACTION_TAP:
+    layout_register(key, node->keycode);
+    advanced_key_macro_add_active_keycode(state, node->keycode);
+    state->deferred_tap_ticks = CURRENT_PROFILE.tick_rate;
+    break;
+
+  case MACRO_ACTION_RELEASE:
+    layout_unregister(key, node->keycode);
+    advanced_key_macro_remove_active_keycode(state, node->keycode);
+    break;
+
+  default:
+    break;
+  }
+}
+
+static void advanced_key_macro(const advanced_key_event_t *event) {
+  const macro_t *macro = &CURRENT_PROFILE.advanced_keys[event->ak_index].macro;
+  ak_state_macro_t *state = &ak_states[event->ak_index].macro;
+
+  switch (event->type) {
+  case AK_EVENT_TYPE_PRESS:
+    advanced_key_macro_stop(state, event->key);
+    advanced_key_macro_run_step(state, event->key, macro->head);
+    break;
+
+  case AK_EVENT_TYPE_RELEASE:
+    advanced_key_macro_stop(state, event->key);
+    break;
+
+  default:
+    break;
+  }
+}
+
+static void advanced_key_reset_states(void) {
+  for (uint32_t i = 0; i < NUM_ADVANCED_KEYS; i++) {
+    const advanced_key_t *ak = &CURRENT_PROFILE.advanced_keys[i];
+    advanced_key_state_t *state = &ak_states[i];
+
+    switch (ak->type) {
+    case AK_TYPE_NULL_BIND:
+      advanced_key_null_bind_reset_state(&state->null_bind);
+      break;
+
+    case AK_TYPE_DYNAMIC_KEYSTROKE:
+      advanced_key_dynamic_keystroke_reset_state(&state->dynamic_keystroke);
+      break;
+
+    case AK_TYPE_TAP_HOLD:
+      advanced_key_tap_hold_reset_state(&state->tap_hold);
+      break;
+
+    case AK_TYPE_TOGGLE:
+      advanced_key_toggle_reset_state(&state->toggle);
+      break;
+
+    case AK_TYPE_MACRO:
+      advanced_key_macro_reset_state(&state->macro);
+      break;
+
+    default:
+      break;
+    }
+  }
+}
+
+void advanced_key_init(void) { advanced_key_reset_states(); }
 
 void advanced_key_clear(void) {
   // Release any keys that are currently pressed
   for (uint32_t i = 0; i < NUM_ADVANCED_KEYS; i++) {
     const advanced_key_t *ak = &CURRENT_PROFILE.advanced_keys[i];
-    const advanced_key_state_t *state = &ak_states[i];
+    advanced_key_state_t *state = &ak_states[i];
 
     switch (ak->type) {
     case AK_TYPE_TAP_HOLD:
@@ -243,12 +392,17 @@ void advanced_key_clear(void) {
         layout_unregister(ak->key, ak->toggle.keycode);
       break;
 
+    case AK_TYPE_MACRO:
+      advanced_key_macro_stop(&state->macro, ak->key);
+      break;
+
     default:
       break;
     }
   }
+
   // Clear the advanced key states
-  memset(ak_states, 0, sizeof(ak_states));
+  advanced_key_reset_states();
 }
 
 void advanced_key_process(const advanced_key_event_t *event) {
@@ -270,6 +424,10 @@ void advanced_key_process(const advanced_key_event_t *event) {
 
   case AK_TYPE_TOGGLE:
     advanced_key_toggle(event);
+    break;
+
+  case AK_TYPE_MACRO:
+    advanced_key_macro(event);
     break;
 
   default:
@@ -303,6 +461,47 @@ void advanced_key_tick(bool has_non_tap_hold_press) {
         state->toggle.stage = TOGGLE_STAGE_NORMAL;
         // Always toggle the key off when in normal behavior
         state->toggle.is_toggled = false;
+      }
+      break;
+
+    case AK_TYPE_MACRO:
+      if (state->macro.current_node != MACRO_NODE_NONE &&
+          state->macro.current_node < NUM_MACRO_NODES) {
+        const macro_node_t *current_node =
+            &CURRENT_PROFILE.macros[state->macro.current_node];
+
+        bool delay_elapsed =
+            timer_elapsed(state->macro.since) >= current_node->delay;
+        switch (current_node->action) {
+        case MACRO_ACTION_TAP:
+          // Run the next macro step in a different matrix scan than the one
+          // that unregistered the key in the case of consecutive taps of the
+          // same keycode.
+          if (state->macro.deferred_tap_ticks > 0) {
+            state->macro.deferred_tap_ticks--;
+            if (state->macro.deferred_tap_ticks == 0) {
+              layout_unregister(ak->key, current_node->keycode);
+              advanced_key_macro_remove_active_keycode(&state->macro,
+                                                       current_node->keycode);
+            }
+          } else if (state->macro.deferred_tap_ticks == 0 && delay_elapsed) {
+            // Unlike other actions, we wait for both the delay and the
+            // deferred tap ticks to elapse before running the next step.
+            advanced_key_macro_run_step(&state->macro, ak->key,
+                                        current_node->next);
+          }
+          break;
+
+        case MACRO_ACTION_PRESS:
+        case MACRO_ACTION_RELEASE:
+          if (delay_elapsed)
+            advanced_key_macro_run_step(&state->macro, ak->key,
+                                        current_node->next);
+          break;
+
+        default:
+          break;
+        }
       }
       break;
 

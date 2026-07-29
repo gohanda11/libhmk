@@ -23,8 +23,14 @@ const eeconfig_t *eeconfig;
 // Default configuration values
 static eeconfig_options_t default_options = DEFAULT_OPTIONS;
 static eeconfig_calibration_t default_calibration = DEFAULT_CALIBRATION;
-static const uint8_t
-    default_keymaps[NUM_PROFILES][NUM_LAYERS][NUM_KEYS] = DEFAULT_KEYMAPS;
+static const uint8_t default_keymaps[NUM_PROFILES][NUM_LAYERS][NUM_KEYS] =
+    DEFAULT_KEYMAPS;
+static const macro_node_t default_macro = {
+    .keycode = KC_NO,
+    .action = MACRO_ACTION_NONE,
+    .delay = 0,
+    .next = MACRO_NODE_NONE,
+};
 static eeconfig_profile_t default_profile = {
     .gamepad_options = DEFAULT_GAMEPAD_OPTIONS,
     .tick_rate = DEFAULT_TICK_RATE,
@@ -36,6 +42,8 @@ static bool eeconfig_write_default_profile(uint8_t profile) {
 
   memcpy(default_profile.keymap, default_keymaps[profile],
          sizeof(default_profile.keymap));
+  for (uint32_t i = 0; i < NUM_MACRO_NODES; i++)
+    default_profile.macros[i] = default_macro;
   return EECONFIG_WRITE(profiles[profile], &default_profile);
 }
 

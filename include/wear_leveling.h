@@ -21,8 +21,8 @@
 // Wear Leveling Configuration
 //--------------------------------------------------------------------+
 
-_Static_assert(WL_VIRTUAL_SIZE <= 8192,
-               "WL_VIRTUAL_SIZE must be at most 8192.");
+_Static_assert(WL_VIRTUAL_SIZE <= 16384,
+               "WL_VIRTUAL_SIZE must be at most 16384.");
 _Static_assert(WL_VIRTUAL_SIZE % 4 == 0,
                "WL_VIRTUAL_SIZE must be word-aligned.");
 
@@ -40,12 +40,18 @@ _Static_assert(WL_BACKING_STORE_SIZE <= FLASH_SIZE,
 //--------------------------------------------------------------------+
 
 #define WL_LOG_ENTRY_SIZE 8
-#define WL_MAX_BYTES_PER_ENTRY 6
+#define WL_MAX_BYTES_PER_ENTRY (WL_VIRTUAL_SIZE <= 8192 ? 6 : 5)
 
 typedef union __attribute__((packed)) {
   struct __attribute__((packed)) {
+// `addr` must contain enough bits to address the virtual storage.
+#if WL_VIRTUAL_SIZE <= 8192
     uint16_t addr : 13;
-    uint8_t len : 3;
+    uint16_t len : 3;
+#else
+    uint16_t addr : 14;
+    uint16_t len : 10;
+#endif
     uint8_t data[WL_MAX_BYTES_PER_ENTRY];
   } fields;
   uint32_t raw[2];

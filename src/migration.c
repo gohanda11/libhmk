@@ -18,112 +18,129 @@
 #include "eeconfig.h"
 #include "wear_leveling.h"
 
+#define MIGRATION_V1_0_GLOBAL_CONFIG_SIZE 12
+#define MIGRATION_V1_0_ADVANCED_KEY_SIZE 12
+#define MIGRATION_V1_0_PROFILE_CONFIG_SIZE                                     \
+  (NUM_LAYERS * NUM_KEYS + NUM_KEYS * 4 +                                      \
+   NUM_ADVANCED_KEYS * MIGRATION_V1_0_ADVANCED_KEY_SIZE + 1)
+
 static bool v1_1_global_config_func(uint8_t *dst, const uint8_t *src);
 static bool v1_1_profile_config_func(uint8_t profile, uint8_t *dst,
                                      const uint8_t *src);
+
+#define MIGRATION_V1_1_GLOBAL_CONFIG_SIZE 14
+#define MIGRATION_V1_1_PROFILE_CONFIG_SIZE                                     \
+  (NUM_LAYERS * NUM_KEYS + NUM_KEYS * 4 +                                      \
+   NUM_ADVANCED_KEYS * MIGRATION_V1_0_ADVANCED_KEY_SIZE + NUM_KEYS + 9 + 1)
 
 static bool v1_2_global_config_func(uint8_t *dst, const uint8_t *src);
 static bool v1_2_profile_config_func(uint8_t profile, uint8_t *dst,
                                      const uint8_t *src);
 
+#define MIGRATION_V1_2_GLOBAL_CONFIG_SIZE (14 + NUM_KEYS * 2)
+#define MIGRATION_V1_2_PROFILE_CONFIG_SIZE MIGRATION_V1_1_PROFILE_CONFIG_SIZE
+
 static bool v1_3_global_config_func(uint8_t *dst, const uint8_t *src);
 static bool v1_3_profile_config_func(uint8_t profile, uint8_t *dst,
                                      const uint8_t *src);
+
+#define MIGRATION_V1_3_GLOBAL_CONFIG_SIZE MIGRATION_V1_2_GLOBAL_CONFIG_SIZE
+#define MIGRATION_V1_3_PROFILE_CONFIG_SIZE MIGRATION_V1_2_PROFILE_CONFIG_SIZE
 
 static bool v1_4_global_config_func(uint8_t *dst, const uint8_t *src);
 static bool v1_4_profile_config_func(uint8_t profile, uint8_t *dst,
                                      const uint8_t *src);
 
+#define MIGRATION_V1_4_GLOBAL_CONFIG_SIZE MIGRATION_V1_3_GLOBAL_CONFIG_SIZE
+#define MIGRATION_V1_4_PROFILE_CONFIG_SIZE MIGRATION_V1_3_PROFILE_CONFIG_SIZE
+
 static bool v1_5_global_config_func(uint8_t *dst, const uint8_t *src);
 static bool v1_5_profile_config_func(uint8_t profile, uint8_t *dst,
                                      const uint8_t *src);
+
+// v1.5 (local): add split_handedness to global config. Profile layout unchanged.
+#define MIGRATION_V1_5_GLOBAL_CONFIG_SIZE (15 + NUM_KEYS * 2)
+#define MIGRATION_V1_5_PROFILE_CONFIG_SIZE MIGRATION_V1_4_PROFILE_CONFIG_SIZE
+
+static bool v1_6_global_config_func(uint8_t *dst, const uint8_t *src);
+static bool v1_6_profile_config_func(uint8_t profile, uint8_t *dst,
+                                     const uint8_t *src);
+
+// v1.6 (upstream 0x0105): expand advanced keys + add per-profile macros.
+#define MIGRATION_V1_6_GLOBAL_CONFIG_SIZE MIGRATION_V1_5_GLOBAL_CONFIG_SIZE
+#define MIGRATION_V1_6_ADVANCED_KEY_SIZE                                       \
+  (3 + 2 * NUM_DYNAMIC_KEYSTROKE_MAX_BINDINGS + 1)
+#define MIGRATION_V1_6_MACRO_NODE_SIZE 4
+#define MIGRATION_V1_6_MACRO_NODE_NONE UINT8_MAX
+#define MIGRATION_V1_6_PROFILE_CONFIG_SIZE                                     \
+  (NUM_LAYERS * NUM_KEYS + NUM_KEYS * 4 +                                      \
+   NUM_ADVANCED_KEYS * MIGRATION_V1_6_ADVANCED_KEY_SIZE +                      \
+   NUM_MACRO_NODES * MIGRATION_V1_6_MACRO_NODE_SIZE + NUM_KEYS + 9 + 1)
 
 // Migration metadata for each configuration version. The first entry is
 // reserved for the initial version (v1.0) which does not require migration.
 static const migration_t migrations[] = {
     {
         .version = 0x0100,
-        .global_config_size = 12,
-        .profile_config_size = NUM_LAYERS * NUM_KEYS    // Keymap
-                               + NUM_KEYS * 4           // Actuation map
-                               + NUM_ADVANCED_KEYS * 12 // Advanced keys
-                               + 1                      // Tick rate
-        ,
+        .global_config_size = MIGRATION_V1_0_GLOBAL_CONFIG_SIZE,
+        .profile_config_size = MIGRATION_V1_0_PROFILE_CONFIG_SIZE,
     },
     {
         .version = 0x0101,
-        .global_config_size = 14,
-        .profile_config_size = NUM_LAYERS * NUM_KEYS    // Keymap
-                               + NUM_KEYS * 4           // Actuation map
-                               + NUM_ADVANCED_KEYS * 12 // Advanced keys
-                               + NUM_KEYS               // Gamepad buttons
-                               + 9                      // Gamepad options
-                               + 1                      // Tick rate
-        ,
+        .global_config_size = MIGRATION_V1_1_GLOBAL_CONFIG_SIZE,
+        .profile_config_size = MIGRATION_V1_1_PROFILE_CONFIG_SIZE,
         .global_config_func = v1_1_global_config_func,
         .profile_config_func = v1_1_profile_config_func,
     },
     {
         .version = 0x0102,
-        .global_config_size = 14             // Other fields
-                              + NUM_KEYS * 2 // Bottom-out threshold
-        ,
-        .profile_config_size = NUM_LAYERS * NUM_KEYS    // Keymap
-                               + NUM_KEYS * 4           // Actuation map
-                               + NUM_ADVANCED_KEYS * 12 // Advanced keys
-                               + NUM_KEYS               // Gamepad buttons
-                               + 9                      // Gamepad options
-                               + 1                      // Tick rate
-        ,
+        .global_config_size = MIGRATION_V1_2_GLOBAL_CONFIG_SIZE,
+        .profile_config_size = MIGRATION_V1_2_PROFILE_CONFIG_SIZE,
         .global_config_func = v1_2_global_config_func,
         .profile_config_func = v1_2_profile_config_func,
     },
     {
         .version = 0x0103,
-        .global_config_size = 14             // Other fields
-                              + NUM_KEYS * 2 // Bottom-out threshold
-        ,
-        .profile_config_size = NUM_LAYERS * NUM_KEYS    // Keymap
-                               + NUM_KEYS * 4           // Actuation map
-                               + NUM_ADVANCED_KEYS * 12 // Advanced keys
-                               + NUM_KEYS               // Gamepad buttons
-                               + 9                      // Gamepad options
-                               + 1                      // Tick rate
-        ,
+        .global_config_size = MIGRATION_V1_3_GLOBAL_CONFIG_SIZE,
+        .profile_config_size = MIGRATION_V1_3_PROFILE_CONFIG_SIZE,
         .global_config_func = v1_3_global_config_func,
         .profile_config_func = v1_3_profile_config_func,
     },
     {
         .version = 0x0104,
-        .global_config_size = 14             // Other fields
-                              + NUM_KEYS * 2 // Bottom-out threshold
-        ,
-        .profile_config_size = NUM_LAYERS * NUM_KEYS    // Keymap
-                               + NUM_KEYS * 4           // Actuation map
-                               + NUM_ADVANCED_KEYS * 12 // Advanced keys
-                               + NUM_KEYS               // Gamepad buttons
-                               + 9                      // Gamepad options
-                               + 1                      // Tick rate
-        ,
+        .global_config_size = MIGRATION_V1_4_GLOBAL_CONFIG_SIZE,
+        .profile_config_size = MIGRATION_V1_4_PROFILE_CONFIG_SIZE,
         .global_config_func = v1_4_global_config_func,
         .profile_config_func = v1_4_profile_config_func,
     },
     {
         .version = 0x0105,
-        .global_config_size = 15             // Other fields
-                              + NUM_KEYS * 2 // Bottom-out threshold
-        ,
-        .profile_config_size = NUM_LAYERS * NUM_KEYS    // Keymap
-                               + NUM_KEYS * 4           // Actuation map
-                               + NUM_ADVANCED_KEYS * 12 // Advanced keys
-                               + NUM_KEYS               // Gamepad buttons
-                               + 9                      // Gamepad options
-                               + 1                      // Tick rate
-        ,
+        .global_config_size = MIGRATION_V1_5_GLOBAL_CONFIG_SIZE,
+        .profile_config_size = MIGRATION_V1_5_PROFILE_CONFIG_SIZE,
         .global_config_func = v1_5_global_config_func,
         .profile_config_func = v1_5_profile_config_func,
     },
+    {
+        .version = 0x0106,
+        .global_config_size = MIGRATION_V1_6_GLOBAL_CONFIG_SIZE,
+        .profile_config_size = MIGRATION_V1_6_PROFILE_CONFIG_SIZE,
+        .global_config_func = v1_6_global_config_func,
+        .profile_config_func = v1_6_profile_config_func,
+    },
 };
+
+// An assertion to remind us to bump the persistent configuration version, and
+// implement a migration function if there is a change to the configuration
+// type. Update the assertion when a new version is added.
+_Static_assert(MIGRATION_V1_6_GLOBAL_CONFIG_SIZE +
+                       NUM_PROFILES * MIGRATION_V1_6_PROFILE_CONFIG_SIZE ==
+                   offsetof(eeconfig_t, magic_end),
+               "Invalid configuration size");
+
+// An assertion to remind us if there is a breaking change to `MACRO_NODE_NONE`.
+// Update the assertion when a new version is added.
+_Static_assert(MIGRATION_V1_6_MACRO_NODE_NONE == MACRO_NODE_NONE,
+               "Invalid MACRO_NODE_NONE");
 
 bool migration_try_migrate(void) {
   if (eeconfig->magic_start != EECONFIG_MAGIC_START)
@@ -240,10 +257,11 @@ bool v1_1_profile_config_func(uint8_t profile, uint8_t *dst,
   // Save the `advanced_keys` offset
   uint8_t *advanced_keys = dst;
   // Copy `advanced_keys`
-  migration_memcpy(&dst, &src, NUM_ADVANCED_KEYS * 12);
+  migration_memcpy(&dst, &src,
+                   NUM_ADVANCED_KEYS * MIGRATION_V1_0_ADVANCED_KEY_SIZE);
   // Default `hold_on_other_key_press` to 0
   for (uint8_t i = 0; i < NUM_ADVANCED_KEYS; i++) {
-    uint8_t *ak = advanced_keys + i * 12;
+    uint8_t *ak = advanced_keys + i * MIGRATION_V1_0_ADVANCED_KEY_SIZE;
     if (ak[2] == AK_TYPE_TAP_HOLD)
       ak[7] = 0;
   }
@@ -284,9 +302,7 @@ bool v1_2_global_config_func(uint8_t *dst, const uint8_t *src) {
 bool v1_2_profile_config_func(uint8_t profile, uint8_t *dst,
                               const uint8_t *src) {
   // Copy the entire profile
-  migration_memcpy(&dst, &src,
-                   NUM_LAYERS * NUM_KEYS + NUM_KEYS * 4 +
-                       NUM_ADVANCED_KEYS * 12 + NUM_KEYS + 9 + 1);
+  migration_memcpy(&dst, &src, MIGRATION_V1_2_PROFILE_CONFIG_SIZE);
 
   return true;
 }
@@ -315,9 +331,7 @@ bool v1_3_global_config_func(uint8_t *dst, const uint8_t *src) {
 bool v1_3_profile_config_func(uint8_t profile, uint8_t *dst,
                               const uint8_t *src) {
   // Copy the entire profile
-  migration_memcpy(&dst, &src,
-                   NUM_LAYERS * NUM_KEYS + NUM_KEYS * 4 +
-                       NUM_ADVANCED_KEYS * 12 + NUM_KEYS + 9 + 1);
+  migration_memcpy(&dst, &src, MIGRATION_V1_3_PROFILE_CONFIG_SIZE);
 
   return true;
 }
@@ -346,15 +360,13 @@ bool v1_4_global_config_func(uint8_t *dst, const uint8_t *src) {
 bool v1_4_profile_config_func(uint8_t profile, uint8_t *dst,
                               const uint8_t *src) {
   // Copy the entire profile
-  migration_memcpy(&dst, &src,
-                   NUM_LAYERS * NUM_KEYS + NUM_KEYS * 4 +
-                       NUM_ADVANCED_KEYS * 12 + NUM_KEYS + 9 + 1);
+  migration_memcpy(&dst, &src, MIGRATION_V1_4_PROFILE_CONFIG_SIZE);
 
   return true;
 }
 
 //--------------------------------------------------------------------+
-// v1.4 -> v1.5 Migration
+// v1.4 -> v1.5 Migration (split_handedness)
 //--------------------------------------------------------------------+
 
 bool v1_5_global_config_func(uint8_t *dst, const uint8_t *src) {
@@ -374,10 +386,53 @@ bool v1_5_global_config_func(uint8_t *dst, const uint8_t *src) {
 
 bool v1_5_profile_config_func(uint8_t profile, uint8_t *dst,
                               const uint8_t *src) {
-  // Copy the entire profile
-  migration_memcpy(&dst, &src,
-                   NUM_LAYERS * NUM_KEYS + NUM_KEYS * 4 +
-                       NUM_ADVANCED_KEYS * 12 + NUM_KEYS + 9 + 1);
+  (void)profile;
+
+  // Copy the entire profile (layout unchanged in v1.5)
+  migration_memcpy(&dst, &src, MIGRATION_V1_5_PROFILE_CONFIG_SIZE);
+
+  return true;
+}
+
+//--------------------------------------------------------------------+
+// v1.5 -> v1.6 Migration (AK expansion + macros)
+//--------------------------------------------------------------------+
+
+bool v1_6_global_config_func(uint8_t *dst, const uint8_t *src) {
+  if (((eeconfig_t *)src)->version != 0x0105)
+    // Expected version v1.5
+    return false;
+
+  // Copy the entire global configuration (includes split_handedness).
+  migration_memcpy(&dst, &src, MIGRATION_V1_6_GLOBAL_CONFIG_SIZE);
+
+  return true;
+}
+
+bool v1_6_profile_config_func(uint8_t profile, uint8_t *dst,
+                              const uint8_t *src) {
+  (void)profile;
+
+  // Copy `keymap` to `actuation_map`.
+  migration_memcpy(&dst, &src, NUM_LAYERS * NUM_KEYS + NUM_KEYS * 4);
+
+  // Expand each advanced key record from 12 bytes to the current size and
+  // clear the newly-added Dynamic Keystroke slots.
+  for (uint8_t i = 0; i < NUM_ADVANCED_KEYS; i++) {
+    migration_memcpy(&dst, &src, MIGRATION_V1_0_ADVANCED_KEY_SIZE);
+    migration_memset(&dst, 0,
+                     MIGRATION_V1_6_ADVANCED_KEY_SIZE -
+                         MIGRATION_V1_0_ADVANCED_KEY_SIZE);
+  }
+
+  // Clear the new per-profile macro buffer.
+  for (uint32_t i = 0; i < NUM_MACRO_NODES; i++) {
+    migration_memset(&dst, 0, 3);
+    migration_assign_uint8_t(&dst, MIGRATION_V1_6_MACRO_NODE_NONE);
+  }
+
+  // Copy the remaining profile fields.
+  migration_memcpy(&dst, &src, NUM_KEYS + 9 + 1);
 
   return true;
 }

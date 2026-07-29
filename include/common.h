@@ -19,7 +19,7 @@
 // Firmware Version
 //--------------------------------------------------------------------+
 
-#define FIRMWARE_VERSION 0x0107
+#define FIRMWARE_VERSION 0x0108
 
 //--------------------------------------------------------------------+
 // Common Headers
@@ -89,6 +89,21 @@ _Static_assert(1 <= NUM_KEYS && NUM_KEYS <= 256,
 _Static_assert(1 <= NUM_ADVANCED_KEYS && NUM_ADVANCED_KEYS <= 64,
                "NUM_ADVANCED_KEYS must be between 1 and 64");
 
+#if !defined(NUM_DYNAMIC_KEYSTROKE_MAX_BINDINGS)
+#error "NUM_DYNAMIC_KEYSTROKE_MAX_BINDINGS is not defined"
+#endif
+
+_Static_assert(4 <= NUM_DYNAMIC_KEYSTROKE_MAX_BINDINGS &&
+                   NUM_DYNAMIC_KEYSTROKE_MAX_BINDINGS <= 64,
+               "NUM_DYNAMIC_KEYSTROKE_MAX_BINDINGS must be between 4 and 64");
+
+#if !defined(NUM_MACRO_NODES)
+#error "NUM_MACRO_NODES is not defined"
+#endif
+
+_Static_assert(1 <= NUM_MACRO_NODES && NUM_MACRO_NODES <= 255,
+               "NUM_MACRO_NODES must be between 1 and 255");
+
 //--------------------------------------------------------------------+
 // Keyboard Types
 //--------------------------------------------------------------------+
@@ -114,6 +129,7 @@ typedef enum {
   AK_TYPE_DYNAMIC_KEYSTROKE,
   AK_TYPE_TAP_HOLD,
   AK_TYPE_TOGGLE,
+  AK_TYPE_MACRO,
   AK_TYPE_COUNT,
 } ak_type_t;
 
@@ -151,14 +167,14 @@ typedef enum {
 
 // Dynamic Keystroke configuration
 typedef struct __attribute__((packed)) {
-  // Bind up to 4 keycodes
-  uint8_t keycodes[4];
+  // Bind up to `NUM_DYNAMIC_KEYSTROKE_MAX_BINDINGS` keycodes
+  uint8_t keycodes[NUM_DYNAMIC_KEYSTROKE_MAX_BINDINGS];
   // For each keycode, bind up to 4 actions for each part of the keystroke
   // Bit 0-1: Action for key press
   // Bit 2-3: Action for key bottom-out
   // Bit 4-5: Action for key release from bottom-out
   // Bit 6-7: Action for key release
-  uint8_t bitmap[4];
+  uint8_t bitmap[NUM_DYNAMIC_KEYSTROKE_MAX_BINDINGS];
   // Bottom-out point (0-255)
   uint8_t bottom_out_point;
 } dynamic_keystroke_t;
@@ -181,6 +197,36 @@ typedef struct __attribute__((packed)) {
   uint16_t tapping_term;
 } toggle_t;
 
+// Macro action
+typedef enum {
+  MACRO_ACTION_NONE = 0,
+  MACRO_ACTION_PRESS,
+  MACRO_ACTION_TAP,
+  MACRO_ACTION_RELEASE,
+  MACRO_ACTION_COUNT,
+} macro_action_t;
+
+typedef uint8_t macro_node_id_t;
+
+#define MACRO_NODE_NONE UINT8_MAX
+
+typedef struct __attribute__((packed)) {
+  uint8_t keycode;
+  uint8_t action : 3;
+  // Delay in milliseconds
+  uint16_t delay : 13;
+  macro_node_id_t next;
+} macro_node_t;
+
+_Static_assert(MACRO_ACTION_COUNT < 8,
+               "MACRO_ACTION_COUNT must be less than 8");
+
+// Macro configuration
+typedef struct __attribute__((packed)) {
+  // The first macro node in the linked list
+  macro_node_id_t head;
+} macro_t;
+
 // Advanced key configuration
 typedef struct __attribute__((packed)) {
   uint8_t layer;
@@ -191,6 +237,7 @@ typedef struct __attribute__((packed)) {
     dynamic_keystroke_t dynamic_keystroke;
     tap_hold_t tap_hold;
     toggle_t toggle;
+    macro_t macro;
   };
 } advanced_key_t;
 

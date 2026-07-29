@@ -55,6 +55,8 @@ typedef enum {
   COMMAND_SET_GAMEPAD_BUTTONS,
   COMMAND_GET_GAMEPAD_OPTIONS,
   COMMAND_SET_GAMEPAD_OPTIONS,
+  COMMAND_GET_MACROS,
+  COMMAND_SET_MACROS,
 
   COMMAND_UNKNOWN = 255,
 } command_id_t;
@@ -62,6 +64,11 @@ typedef enum {
 //---------------------------------------------------------------------+
 // Input Report Structures
 //---------------------------------------------------------------------+
+
+// Number of per-profile staged protocol data bytes that fit in a single raw HID
+// packet after the command header fields.
+#define COMMAND_SET_STAGED_PROFILE_BYTES_PER_PACKET 59
+#define COMMAND_GET_STAGED_PROFILE_BYTES_PER_PACKET 62
 
 typedef struct __attribute__((packed)) {
   uint8_t offset;
@@ -105,10 +112,12 @@ typedef struct __attribute__((packed)) {
 
 typedef struct __attribute__((packed)) {
   uint8_t profile;
-  uint8_t offset;
+  // Byte offset within the destination buffer.
+  uint16_t offset;
+  // Number of bytes to write from `data`
   uint8_t len;
-  advanced_key_t advanced_keys[5];
-} command_in_advanced_keys_t;
+  uint8_t data[COMMAND_SET_STAGED_PROFILE_BYTES_PER_PACKET];
+} command_in_staged_profile_t;
 
 typedef struct __attribute__((packed)) {
   uint8_t profile;
@@ -141,10 +150,10 @@ typedef struct __attribute__((packed)) {
 
     command_in_keymap_t keymap;
     command_in_actuation_map_t actuation_map;
-    command_in_advanced_keys_t advanced_keys;
     command_in_tick_rate_t tick_rate;
     command_in_gamepad_buttons_t gamepad_buttons;
     command_in_gamepad_options_t gamepad_options;
+    command_in_staged_profile_t staged_profile;
   };
 } command_in_buffer_t;
 
@@ -173,6 +182,12 @@ typedef struct __attribute__((packed)) {
   uint8_t init_ok;
 } command_out_pointing_device_info_t;
 
+typedef struct __attribute__((packed)) {
+  // Number of valid bytes in `data`
+  uint8_t len;
+  uint8_t data[COMMAND_GET_STAGED_PROFILE_BYTES_PER_PACKET];
+} command_out_staged_profile_t;
+
 // Command output buffer type
 typedef struct __attribute__((packed)) {
   uint8_t command_id;
@@ -198,19 +213,52 @@ typedef struct __attribute__((packed)) {
     uint8_t keymap[63];
     // For `COMMAND_GET_ACTUATION_MAP`
     actuation_t actuation_map[15];
-    // For `COMMAND_GET_ADVANCED_KEYS`
-    advanced_key_t advanced_keys[5];
     // For `COMMAND_GET_TICK_RATE`
     uint8_t tick_rate;
     // For `COMMAND_GET_GAMEPAD_BUTTONS`
     uint8_t gamepad_buttons[63];
     // For `COMMAND_GET_GAMEPAD_OPTIONS`
     gamepad_options_t gamepad_options;
+    // For `COMMAND_GET_ADVANCED_KEYS` and `COMMAND_GET_MACROS`
+    command_out_staged_profile_t staged_profile;
   };
 } command_out_buffer_t;
 
 _Static_assert(sizeof(command_out_buffer_t) <= RAW_HID_EP_SIZE,
                "Invalid command output buffer size");
+
+//---------------------------------------------------------------------+
+// Staged Protocol
+//---------------------------------------------------------------------+
+
+typedef enum {
+  COMMAND_STAGED_NONE = 0,
+  COMMAND_STAGED_ADVANCED_KEYS,
+  COMMAND_STAGED_MACROS,
+} command_staged_id_t;
+
+typedef union {
+  advanced_key_t advanced_key;
+  macro_node_t macro_node;
+} command_staged_buffer_data_t;
+
+typedef struct {
+  uint8_t staged_id;
+  uint8_t profile;
+  uint32_t offset;
+  union {
+    command_staged_buffer_data_t data;
+    uint8_t raw_data[sizeof(command_staged_buffer_data_t)];
+  };
+} command_staged_buffer_t;
+
+typedef struct {
+  uint8_t staged_id;
+  command_in_staged_profile_t *p;
+  uint32_t field_size;
+  uint32_t item_size;
+  bool (*write_func)(void);
+} command_staged_write_t;
 
 //---------------------------------------------------------------------+
 // Command API
@@ -224,10 +272,22 @@ _Static_assert(sizeof(command_out_buffer_t) <= RAW_HID_EP_SIZE,
 void command_init(void);
 
 /**
- * @brief Process a command buffer received from the raw HID interface
+ * @brief Queue a command buffer received from the raw HID interface
  *
- * @param in_buf Command buffer
+ * Note that only one command can be queued at a time. The queued command will
+ * be processed in the next call to `command_task`. Any subsequent commands
+ * while a command is queued will be dropped.
+ *
+ * @param buf Command buffer
+ * @param len Buffer length in bytes
+ *
+ * @return `true` if the command was queued
+ */
+bool command_enqueue(const uint8_t *buf, uint16_t len);
+
+/**
+ * @brief Process queued raw HID commands and send pending responses
  *
  * @return None
  */
-void command_process(const uint8_t *buf);
+void command_task(void);

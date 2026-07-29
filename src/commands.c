@@ -32,13 +32,163 @@
     break;                                                                     \
   }
 
-static uint8_t out_buf[RAW_HID_EP_SIZE];
 static const uint8_t keyboard_metadata[] = {KEYBOARD_METADATA};
 
-void command_init(void) {}
+// `volatile` to prevent compiler optimizations
+static volatile bool command_request_pending;
+static volatile bool command_response_pending;
+static uint8_t in_buf[RAW_HID_EP_SIZE];
+static uint8_t out_buf[RAW_HID_EP_SIZE];
 
-void command_process(const uint8_t *buf) {
-  const command_in_buffer_t *in = (const command_in_buffer_t *)buf;
+command_staged_buffer_t staged_buffer;
+
+static void command_reset_staged_buffer(void) {
+  staged_buffer.staged_id = COMMAND_STAGED_NONE;
+  staged_buffer.profile = 0;
+  staged_buffer.offset = 0;
+}
+
+/**
+ * @brief Write the advanced key staged in `staged_buffer`
+ *
+ * Caller must make sure that the staged advanced key is in a valid state.
+ *
+ * @return `true` if the write was successful
+ */
+static bool command_write_staged_advanced_key(void) {
+  if (staged_buffer.staged_id != COMMAND_STAGED_ADVANCED_KEYS)
+    return false;
+
+  const uint8_t profile = staged_buffer.profile;
+  const uint8_t key_index = staged_buffer.offset / sizeof(advanced_key_t);
+
+  if (profile >= NUM_PROFILES || key_index >= NUM_ADVANCED_KEYS)
+    return false;
+
+  if (profile == eeconfig->current_profile)
+    advanced_key_clear();
+
+  const bool success = EECONFIG_WRITE_N(
+      profiles[profile].advanced_keys[key_index],
+      &staged_buffer.data.advanced_key, sizeof(advanced_key_t));
+
+  if (profile == eeconfig->current_profile)
+    layout_load_advanced_keys();
+
+  return success;
+}
+
+/**
+ * @brief Write the macro node staged in `staged_buffer`
+ *
+ * Caller must make sure that the staged macro node is in a valid state.
+ *
+ * @return `true` if the write was successful
+ */
+static bool command_write_staged_macro(void) {
+  if (staged_buffer.staged_id != COMMAND_STAGED_MACROS)
+    return false;
+
+  const uint8_t profile = staged_buffer.profile;
+  const uint8_t node_id = staged_buffer.offset / sizeof(macro_node_t);
+
+  if (profile >= NUM_PROFILES || node_id >= NUM_MACRO_NODES)
+    return false;
+
+  if (profile == eeconfig->current_profile)
+    advanced_key_clear();
+
+  const bool success =
+      EECONFIG_WRITE_N(profiles[profile].macros[node_id],
+                       &staged_buffer.data.macro_node, sizeof(macro_node_t));
+
+  if (profile == eeconfig->current_profile)
+    layout_load_advanced_keys();
+
+  return success;
+}
+
+/**
+ * @brief Stage the staged protocol payload to be written at a later time to
+ * prevent partial writes to the persistent configuration
+ *
+ * @return `true` if the stage was successful
+ */
+__attribute__((always_inline)) static inline bool
+command_stage_write(const command_staged_write_t args) {
+  const uint8_t staged_id = args.staged_id;
+  const command_in_staged_profile_t *p = args.p;
+  const uint32_t field_size = args.field_size;
+  const uint32_t item_size = args.item_size;
+  bool (*write_func)(void) = args.write_func;
+
+  if (p->offset + p->len > field_size || p->len > M_ARRAY_SIZE(p->data) ||
+      p->len == 0)
+    goto fail;
+
+  if (p->offset % item_size == 0) {
+    // It is always safe to start staging at the beginning of an item.
+    staged_buffer.staged_id = staged_id;
+    staged_buffer.profile = p->profile;
+    staged_buffer.offset = p->offset;
+  }
+
+  if (staged_id != staged_buffer.staged_id ||
+      p->offset != staged_buffer.offset || p->profile != staged_buffer.profile)
+    // Unexpected staged id, write offset, or profile mismatch.
+    goto fail;
+
+  for (uint32_t i = 0; i < p->len;) {
+    const uint32_t current_item_offset = staged_buffer.offset % item_size;
+    const uint32_t write_len =
+        M_MIN(p->len - i, item_size - current_item_offset);
+
+    memcpy(staged_buffer.raw_data + current_item_offset, p->data + i,
+           write_len);
+
+    if (p->len - i >= item_size - current_item_offset) {
+      const bool success = write_func();
+      if (!success)
+        goto fail;
+    }
+
+    staged_buffer.offset += write_len;
+    i += write_len;
+  }
+
+  return true;
+
+fail:
+  command_reset_staged_buffer();
+  return false;
+}
+
+void command_init(void) {
+  command_request_pending = false;
+  command_response_pending = false;
+  command_reset_staged_buffer();
+}
+
+bool command_enqueue(const uint8_t *buf, uint16_t len) {
+  if (len != RAW_HID_EP_SIZE || command_request_pending ||
+      command_response_pending)
+    // Either `command_request_pending` or `command_response_pending` is set
+    // means that there is already a command queued.
+    return false;
+
+  memcpy(in_buf, buf, RAW_HID_EP_SIZE);
+  command_request_pending = true;
+
+  return true;
+}
+
+/**
+ * @brief Process the queued command and write the response
+ *
+ * @return None
+ */
+static void command_process(void) {
+  const command_in_buffer_t *in = (const command_in_buffer_t *)in_buf;
   command_out_buffer_t *out = (command_out_buffer_t *)out_buf;
 
   bool success = true;
@@ -250,33 +400,61 @@ void command_process(const uint8_t *buf) {
     break;
   }
   case COMMAND_GET_ADVANCED_KEYS: {
-    const command_in_advanced_keys_t *p = &in->advanced_keys;
+    const command_in_staged_profile_t *p = &in->staged_profile;
+    const uint32_t advanced_keys_size =
+        sizeof(eeconfig->profiles[p->profile].advanced_keys);
 
     COMMAND_VERIFY(p->profile < NUM_PROFILES);
-    COMMAND_VERIFY(p->offset < NUM_ADVANCED_KEYS);
+    COMMAND_VERIFY(p->offset < advanced_keys_size);
 
-    memcpy(out->advanced_keys,
-           eeconfig->profiles[p->profile].advanced_keys + p->offset,
-           M_MIN(M_ARRAY_SIZE(out->advanced_keys),
-                 (uint32_t)(NUM_ADVANCED_KEYS - p->offset)) *
-               sizeof(advanced_key_t));
+    out->staged_profile.len = M_MIN(M_ARRAY_SIZE(out->staged_profile.data),
+                                    advanced_keys_size - p->offset);
+    memcpy(out->staged_profile.data,
+           (const uint8_t *)eeconfig->profiles[p->profile].advanced_keys +
+               p->offset,
+           out->staged_profile.len);
     break;
   }
   case COMMAND_SET_ADVANCED_KEYS: {
-    const command_in_advanced_keys_t *p = &in->advanced_keys;
+    const command_in_staged_profile_t *p = &in->staged_profile;
 
     COMMAND_VERIFY(p->profile < NUM_PROFILES);
-    COMMAND_VERIFY(p->offset < NUM_ADVANCED_KEYS);
-    COMMAND_VERIFY(p->len <= M_ARRAY_SIZE(p->advanced_keys) &&
-                   p->len <= NUM_ADVANCED_KEYS - p->offset);
 
-    if (p->profile == eeconfig->current_profile)
-      advanced_key_clear();
-    success =
-        EECONFIG_WRITE_N(profiles[p->profile].advanced_keys[p->offset],
-                         p->advanced_keys, sizeof(advanced_key_t) * p->len);
-    if (p->profile == eeconfig->current_profile)
-      layout_load_advanced_keys();
+    success = command_stage_write((command_staged_write_t){
+        .staged_id = COMMAND_STAGED_ADVANCED_KEYS,
+        .p = (command_in_staged_profile_t *)p,
+        .field_size = sizeof(eeconfig->profiles[p->profile].advanced_keys),
+        .item_size = sizeof(advanced_key_t),
+        .write_func = command_write_staged_advanced_key,
+    });
+    break;
+  }
+  case COMMAND_GET_MACROS: {
+    const command_in_staged_profile_t *p = &in->staged_profile;
+    const uint32_t macros_size = sizeof(eeconfig->profiles[p->profile].macros);
+
+    COMMAND_VERIFY(p->profile < NUM_PROFILES);
+    COMMAND_VERIFY(p->offset < macros_size);
+
+    out->staged_profile.len =
+        M_MIN(M_ARRAY_SIZE(out->staged_profile.data), macros_size - p->offset);
+    memcpy(out->staged_profile.data,
+           (const uint8_t *)eeconfig->profiles[p->profile].macros + p->offset,
+           out->staged_profile.len);
+    break;
+  }
+  case COMMAND_SET_MACROS: {
+    const command_in_staged_profile_t *p = &in->staged_profile;
+
+    COMMAND_VERIFY(p->profile < NUM_PROFILES);
+
+    success = command_stage_write((command_staged_write_t){
+        .staged_id = COMMAND_STAGED_MACROS,
+        .p = (command_in_staged_profile_t *)p,
+        .field_size = sizeof(eeconfig->profiles[p->profile].macros),
+        .item_size = sizeof(macro_node_t),
+        .write_func = command_write_staged_macro,
+    });
     break;
   }
   case COMMAND_GET_TICK_RATE: {
@@ -346,9 +524,17 @@ void command_process(const uint8_t *buf) {
 
   // Echo the command ID back to the host if successful
   out->command_id = success ? in->command_id : COMMAND_UNKNOWN;
+}
 
-  while (!tud_hid_n_ready(USB_ITF_RAW_HID))
-    // Wait for the raw HID interface to be ready
-    tud_task();
-  tud_hid_n_report(USB_ITF_RAW_HID, 0, out_buf, RAW_HID_EP_SIZE);
+void command_task(void) {
+  if (command_request_pending) {
+    command_process();
+    command_request_pending = false;
+    command_response_pending = true;
+  }
+
+  if (command_response_pending && tud_hid_n_ready(USB_ITF_RAW_HID) &&
+      tud_hid_n_report(USB_ITF_RAW_HID, 0, out_buf, RAW_HID_EP_SIZE))
+    // The command response has been sent, so clear the queue.
+    command_response_pending = false;
 }

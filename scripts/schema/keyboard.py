@@ -49,6 +49,9 @@ class KeyboardKeyboard(StrictBaseModel):
     num_layers: int = Field(ge=1, le=8)
     num_keys: int = Field(ge=1, le=256)
     num_advanced_keys: int = Field(ge=1, le=64)
+    # Maximum number of Dynamic Keystroke bindings per key. Higher values may require higher storage sizes.
+    num_dynamic_keystroke_max_bindings: int = Field(ge=4, le=64, default=4)
+    num_macro_nodes: int = Field(ge=1, le=255, default=128)
 
 
 # Hardware Configuration
@@ -100,7 +103,7 @@ class KeyboardCalibration(StrictBaseModel):
 # Wear leveling Configuration
 class KeyboardWearLeveling(StrictBaseModel):
     # Size of the virtual persistent storage in bytes. There must be enough RAM of this size to hold the entire virtual storage.
-    virtual_size: int = Field(ge=1, le=8192)
+    virtual_size: int = Field(ge=1, le=16384)
     # Size of the write log in bytes
     write_log_size: int = Field(ge=1, le=65536)
 

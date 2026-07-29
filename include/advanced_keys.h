@@ -35,7 +35,7 @@ typedef struct {
 
 typedef struct {
   // Whether each key binding is registered
-  bool is_pressed[4];
+  bool is_pressed[NUM_DYNAMIC_KEYSTROKE_MAX_BINDINGS];
   // Whether the key is bottomed out
   bool is_bottomed_out;
 } ak_state_dynamic_keystroke_t;
@@ -81,6 +81,30 @@ typedef struct {
 } ak_state_toggle_t;
 
 //--------------------------------------------------------------------+
+// Macro State
+//--------------------------------------------------------------------+
+
+#if !defined(MAX_MACRO_ACTIVE_KEYCODES)
+// Max number of active keycodes each macro can track. This is only used for
+// stopping the macro by releasing all active keycodes. The behavior is
+// undefined if there are more active keycodes than this value.
+#define MAX_MACRO_ACTIVE_KEYCODES 16
+#endif
+
+typedef struct {
+  // Time since we processed the current node
+  uint32_t since;
+  // Ticks to wait for an in-progress deferred tap
+  uint16_t deferred_tap_ticks;
+  // Current macro node
+  macro_node_id_t current_node;
+  // Number of active keycodes
+  uint16_t num_active_keycodes;
+  // Active keycodes
+  uint8_t active_keycodes[MAX_MACRO_ACTIVE_KEYCODES];
+} ak_state_macro_t;
+
+//--------------------------------------------------------------------+
 // Advanced Key State
 //--------------------------------------------------------------------+
 
@@ -90,6 +114,7 @@ typedef union {
   ak_state_dynamic_keystroke_t dynamic_keystroke;
   ak_state_tap_hold_t tap_hold;
   ak_state_toggle_t toggle;
+  ak_state_macro_t macro;
 } advanced_key_state_t;
 
 //--------------------------------------------------------------------+

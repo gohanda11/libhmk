@@ -59,6 +59,8 @@ def keyboard_metadata_def():
         "numLayers": kb_json.keyboard.num_layers,
         "numKeys": kb_json.keyboard.num_keys,
         "numAdvancedKeys": kb_json.keyboard.num_advanced_keys,
+        "numDynamicKeystrokeMaxBindings": kb_json.keyboard.num_dynamic_keystroke_max_bindings,
+        "numMacroNodes": kb_json.keyboard.num_macro_nodes,
         "layout": kb_json.layout.model_dump(exclude_none=True),
         "defaultKeymaps": utils.resolve_default_keymaps(kb_json),
     }
