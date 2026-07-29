@@ -60,6 +60,13 @@ typedef union __attribute__((packed)) {
 _Static_assert(sizeof(eeconfig_options_t) == sizeof(uint16_t),
                "Invalid eeconfig_options_t size");
 
+// Pointing device runtime configuration (device-common, not per-profile)
+typedef struct __attribute__((packed)) {
+  bool enabled;
+  bool auto_mouse_layer_enabled;
+  uint16_t cpi;
+} pointing_config_t;
+
 // Keyboard profile configuration
 typedef struct __attribute__((packed)) {
   uint8_t keymap[NUM_LAYERS][NUM_KEYS];
@@ -74,7 +81,7 @@ typedef struct __attribute__((packed)) {
 // Persistent configuration version. The size of the configuration must be
 // non-decreasing, so that the migration can assume that the new version is at
 // least as large as the previous version.
-#define EECONFIG_VERSION 0x0106
+#define EECONFIG_VERSION 0x0107
 
 // Keyboard configuration
 // Whenever there is a change in the configuration, `EECONFIG_VERSION` must be
@@ -100,6 +107,8 @@ typedef struct __attribute__((packed)) {
   uint8_t last_non_default_profile;
   // Split keyboard handedness: 0 = left, 1 = right
   uint8_t split_handedness;
+  // Pointing device configuration (master EEPROM only)
+  pointing_config_t pointing_config;
   // End of global configurations
 
   // Profiles
@@ -139,8 +148,8 @@ extern const eeconfig_t *eeconfig;
 #endif
 
 #if !defined(DEFAULT_ACTUATION_POINT)
-// Default actuation point
-#define DEFAULT_ACTUATION_POINT 128
+// Default actuation point (2.00mm when TRAVEL_UNITS=400)
+#define DEFAULT_ACTUATION_POINT 200
 #endif
 
 #if !defined(DEFAULT_GAMEPAD_OPTIONS)
@@ -161,6 +170,16 @@ extern const eeconfig_t *eeconfig;
 #if !defined(DEFAULT_SPLIT_HANDEDNESS)
 // Default split keyboard handedness (0 = left, 1 = right)
 #define DEFAULT_SPLIT_HANDEDNESS 0
+#endif
+
+#if !defined(DEFAULT_POINTING_CONFIG)
+// Default pointing configuration. CPI falls back to 0 (board/driver default).
+#define DEFAULT_POINTING_CONFIG                                                \
+  {                                                                            \
+      .enabled = true,                                                         \
+      .auto_mouse_layer_enabled = true,                                        \
+      .cpi = 0,                                                                \
+  }
 #endif
 
 //--------------------------------------------------------------------+

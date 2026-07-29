@@ -65,10 +65,10 @@ typedef struct {
   // ADC value when the key is fully pressed
   uint16_t adc_bottom_out_value;
 
-  // Key travel distance (0-255)
-  uint8_t distance;
-  // Last extremum point of the key travel distance (0-255)
-  uint8_t extremum;
+  // Key travel distance (0-TRAVEL_UNITS)
+  uint16_t distance;
+  // Last extremum point of the key travel distance (0-TRAVEL_UNITS)
+  uint16_t extremum;
   // Current key travel direction
   uint8_t key_dir;
   // Whether the key is pressed
@@ -115,11 +115,11 @@ void matrix_scan(void);
  * distances against the USB-connected half's authoritative actuation profile.
  *
  * @param key Key index
- * @param distance Travel distance in the range [0, 255]
+ * @param distance Travel distance in the range [0, TRAVEL_UNITS]
  *
  * @return None
  */
-void matrix_update_press_state(uint8_t key, uint8_t distance);
+void matrix_update_press_state(uint8_t key, uint16_t distance);
 
 /**
  * @brief Disable Rapid Trigger of a key

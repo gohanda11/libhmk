@@ -66,7 +66,7 @@ static bitmap_t rapid_trigger_disabled[] = MAKE_BITMAP(NUM_KEYS);
 #if !defined(MATRIX_DISTANCE_AGC_MIN_PEAK)
 // Do not engage scaling until a key has traveled at least this far. Prevents
 // soft taps from permanently over-amplifying subsequent presses.
-#define MATRIX_DISTANCE_AGC_MIN_PEAK 96
+#define MATRIX_DISTANCE_AGC_MIN_PEAK ((uint16_t)(96u * (uint32_t)TRAVEL_UNITS / 255u))
 #endif
 
 #if !defined(MATRIX_DISTANCE_AGC_DECAY_MS)
@@ -74,19 +74,19 @@ static bitmap_t rapid_trigger_disabled[] = MAKE_BITMAP(NUM_KEYS);
 #define MATRIX_DISTANCE_AGC_DECAY_MS 2000
 #endif
 
-static uint8_t distance_peak[NUM_KEYS];
+static uint16_t distance_peak[NUM_KEYS];
 static uint32_t distance_agc_decay_timer;
 
-static uint8_t matrix_apply_distance_agc(uint8_t key, uint8_t distance) {
+static uint16_t matrix_apply_distance_agc(uint8_t key, uint16_t distance) {
   if (distance > distance_peak[key])
     distance_peak[key] = distance;
 
-  const uint8_t peak = distance_peak[key];
-  if (peak < MATRIX_DISTANCE_AGC_MIN_PEAK || peak >= 255)
+  const uint16_t peak = distance_peak[key];
+  if (peak < MATRIX_DISTANCE_AGC_MIN_PEAK || peak >= (uint16_t)TRAVEL_UNITS)
     return distance;
 
-  // distance <= peak, so the scaled value fits in uint8_t.
-  return (uint8_t)((uint16_t)distance * 255u / peak);
+  // distance <= peak, so the scaled value fits in uint16_t for TRAVEL_UNITS.
+  return (uint16_t)((uint32_t)distance * (uint32_t)TRAVEL_UNITS / peak);
 }
 
 static void matrix_distance_agc_decay(void) {
@@ -174,7 +174,7 @@ void matrix_recalibrate(bool reset_bottom_out_threshold) {
   }
 }
 
-void matrix_update_press_state(uint8_t key, uint8_t distance) {
+void matrix_update_press_state(uint8_t key, uint16_t distance) {
   const actuation_t *actuation = &CURRENT_PROFILE.actuation_map[key];
 
   key_matrix[key].distance = distance;
@@ -184,9 +184,9 @@ void matrix_update_press_state(uint8_t key, uint8_t distance) {
     key_matrix[key].is_pressed =
         (key_matrix[key].distance >= actuation->actuation_point);
   } else {
-    const uint8_t reset_point =
+    const uint16_t reset_point =
         actuation->continuous ? 0 : actuation->actuation_point;
-    const uint8_t rt_up =
+    const uint16_t rt_up =
         actuation->rt_up == 0 ? actuation->rt_down : actuation->rt_up;
 
     switch (key_matrix[key].key_dir) {
@@ -263,7 +263,7 @@ static void matrix_scan_key(uint32_t i) {
     // difference is at least the calibration epsilon.
     key_matrix[i].adc_bottom_out_value = new_adc_filtered;
 
-  const uint8_t raw_distance = adc_to_distance(
+  const uint16_t raw_distance = adc_to_distance(
       new_adc_filtered, key_matrix[i].adc_rest_value,
       key_matrix[i].adc_bottom_out_value);
 #if defined(SPLIT_KEYBOARD)

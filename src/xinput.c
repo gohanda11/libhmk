@@ -141,7 +141,8 @@ void xinput_process(uint8_t key) {
   }
   case GP_BUTTON_LS_UP ... GP_BUTTON_RT: {
     // Update the maximum analog value for the analog button
-    ANALOG_STATE(keycode) = M_MAX(ANALOG_STATE(keycode), k->distance);
+    ANALOG_STATE(keycode) =
+        M_MAX(ANALOG_STATE(keycode), distance_to_u8(k->distance));
     break;
   }
   default: {

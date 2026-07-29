@@ -23,6 +23,7 @@ const eeconfig_t *eeconfig;
 // Default configuration values
 static eeconfig_options_t default_options = DEFAULT_OPTIONS;
 static eeconfig_calibration_t default_calibration = DEFAULT_CALIBRATION;
+static pointing_config_t default_pointing_config = DEFAULT_POINTING_CONFIG;
 static const uint8_t default_keymaps[NUM_PROFILES][NUM_LAYERS][NUM_KEYS] =
     DEFAULT_KEYMAPS;
 static const macro_node_t default_macro = {
@@ -84,6 +85,7 @@ bool eeconfig_reset(void) {
   EECONFIG_WRITE_LOCAL(current_profile, 0);
   EECONFIG_WRITE_LOCAL(last_non_default_profile, M_MIN(1, NUM_PROFILES - 1));
   EECONFIG_WRITE_LOCAL(split_handedness, DEFAULT_SPLIT_HANDEDNESS);
+  status &= EECONFIG_WRITE(pointing_config, &default_pointing_config);
   for (uint32_t i = 0; i < NUM_PROFILES; i++)
     status &= eeconfig_write_default_profile(i);
   EECONFIG_WRITE_LOCAL(magic_end, EECONFIG_MAGIC_END);

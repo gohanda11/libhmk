@@ -52,6 +52,8 @@ class KeyboardKeyboard(StrictBaseModel):
     # Maximum number of Dynamic Keystroke bindings per key. Higher values may require higher storage sizes.
     num_dynamic_keystroke_max_bindings: int = Field(ge=4, le=64, default=4)
     num_macro_nodes: int = Field(ge=1, le=255, default=128)
+    # Nominal full key travel in millimeters. Converted to TRAVEL_UNITS (x100).
+    travel_mm: float | None = Field(default=None, gt=0, le=655.35)
 
 
 # Hardware Configuration
@@ -177,8 +179,8 @@ class KeyboardSplit(StrictBaseModel):
 
 # Actuation Configuration
 class KeyboardActuation(StrictBaseModel):
-    # Default actuation point
-    actuation_point: int = Field(ge=0, le=255)
+    # Default actuation point in TRAVEL_UNITS (0.01mm nominal)
+    actuation_point: int = Field(ge=0, le=65535)
 
 
 # Pointing Device Pin Configuration

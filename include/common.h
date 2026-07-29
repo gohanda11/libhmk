@@ -19,7 +19,7 @@
 // Firmware Version
 //--------------------------------------------------------------------+
 
-#define FIRMWARE_VERSION 0x0108
+#define FIRMWARE_VERSION 0x0109
 
 //--------------------------------------------------------------------+
 // Common Headers
@@ -104,6 +104,36 @@ _Static_assert(4 <= NUM_DYNAMIC_KEYSTROKE_MAX_BINDINGS &&
 _Static_assert(1 <= NUM_MACRO_NODES && NUM_MACRO_NODES <= 255,
                "NUM_MACRO_NODES must be between 1 and 255");
 
+
+//--------------------------------------------------------------------+
+// Travel Distance Domain
+//--------------------------------------------------------------------+
+
+// Nominal full-travel units (0.01mm). Rest→bottom-out is normalized to this
+// range. Override per keyboard with -DTRAVEL_UNITS from travel_mm.
+#if !defined(TRAVEL_UNITS)
+#define TRAVEL_UNITS 400
+#endif
+
+_Static_assert(TRAVEL_UNITS > 0 && TRAVEL_UNITS <= 65535,
+               "TRAVEL_UNITS must fit in uint16_t");
+
+/**
+ * @brief Convert a legacy uint8 travel value to the internal domain
+ */
+__attribute__((always_inline)) static inline uint16_t
+distance_from_u8(uint8_t v) {
+  return (uint16_t)((uint32_t)v * (uint32_t)TRAVEL_UNITS / 255u);
+}
+
+/**
+ * @brief Convert an internal travel value to the legacy uint8 domain
+ */
+__attribute__((always_inline)) static inline uint8_t
+distance_to_u8(uint16_t v) {
+  return (uint8_t)((uint32_t)v * 255u / (uint32_t)TRAVEL_UNITS);
+}
+
 //--------------------------------------------------------------------+
 // Keyboard Types
 //--------------------------------------------------------------------+
@@ -112,12 +142,12 @@ _Static_assert(1 <= NUM_MACRO_NODES && NUM_MACRO_NODES <= 255,
 // enabled. If `rt_up` is non-zero, both `rt_down` and `rt_up` are used to
 // configure the Rapid Trigger press and release sensitivity, respectively.
 typedef struct __attribute__((packed)) {
-  // Actuation point (0-255)
-  uint8_t actuation_point;
-  // Rapid Trigger press sensitivity (0-255)
-  uint8_t rt_down;
-  // Rapid Trigger release sensitivity (0-255)
-  uint8_t rt_up;
+  // Actuation point (0-TRAVEL_UNITS)
+  uint16_t actuation_point;
+  // Rapid Trigger press sensitivity (0-TRAVEL_UNITS)
+  uint16_t rt_down;
+  // Rapid Trigger release sensitivity (0-TRAVEL_UNITS)
+  uint16_t rt_up;
   // Whether Continuous Rapid Trigger is enabled
   bool continuous;
 } actuation_t;
@@ -152,9 +182,9 @@ typedef enum {
 typedef struct __attribute__((packed)) {
   uint8_t secondary_key;
   uint8_t behavior;
-  // Bottom-out point (0-255). If non-zero, both keys will be registered if both
-  // of them are pressed past this point, regardless of the behavior.
-  uint8_t bottom_out_point;
+  // Bottom-out point (0-TRAVEL_UNITS). If non-zero, both keys will be registered
+  // if both of them are pressed past this point, regardless of the behavior.
+  uint16_t bottom_out_point;
 } null_bind_t;
 
 // Dynamic Keystroke actions for each part of the keystroke
@@ -175,8 +205,8 @@ typedef struct __attribute__((packed)) {
   // Bit 4-5: Action for key release from bottom-out
   // Bit 6-7: Action for key release
   uint8_t bitmap[NUM_DYNAMIC_KEYSTROKE_MAX_BINDINGS];
-  // Bottom-out point (0-255)
-  uint8_t bottom_out_point;
+  // Bottom-out point (0-TRAVEL_UNITS)
+  uint16_t bottom_out_point;
 } dynamic_keystroke_t;
 
 // Tap-Hold configuration

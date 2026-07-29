@@ -77,6 +77,22 @@ static bool v1_6_profile_config_func(uint8_t profile, uint8_t *dst,
    NUM_ADVANCED_KEYS * MIGRATION_V1_6_ADVANCED_KEY_SIZE +                      \
    NUM_MACRO_NODES * MIGRATION_V1_6_MACRO_NODE_SIZE + NUM_KEYS + 9 + 1)
 
+static bool v1_7_global_config_func(uint8_t *dst, const uint8_t *src);
+static bool v1_7_profile_config_func(uint8_t profile, uint8_t *dst,
+                                     const uint8_t *src);
+
+// v1.7: uint16 travel domain + pointing_config device field.
+#define MIGRATION_V1_7_GLOBAL_CONFIG_SIZE                                      \
+  (MIGRATION_V1_6_GLOBAL_CONFIG_SIZE + sizeof(pointing_config_t))
+#define MIGRATION_V1_7_ACTUATION_SIZE 7
+#define MIGRATION_V1_7_ADVANCED_KEY_SIZE                                       \
+  (3 + 2 * NUM_DYNAMIC_KEYSTROKE_MAX_BINDINGS + 2)
+#define MIGRATION_V1_7_PROFILE_CONFIG_SIZE                                     \
+  (NUM_LAYERS * NUM_KEYS + NUM_KEYS * MIGRATION_V1_7_ACTUATION_SIZE +          \
+   NUM_ADVANCED_KEYS * MIGRATION_V1_7_ADVANCED_KEY_SIZE +                      \
+   NUM_MACRO_NODES * MIGRATION_V1_6_MACRO_NODE_SIZE + NUM_KEYS + 9 + 1)
+
+
 // Migration metadata for each configuration version. The first entry is
 // reserved for the initial version (v1.0) which does not require migration.
 static const migration_t migrations[] = {
@@ -127,13 +143,20 @@ static const migration_t migrations[] = {
         .global_config_func = v1_6_global_config_func,
         .profile_config_func = v1_6_profile_config_func,
     },
+    {
+        .version = 0x0107,
+        .global_config_size = MIGRATION_V1_7_GLOBAL_CONFIG_SIZE,
+        .profile_config_size = MIGRATION_V1_7_PROFILE_CONFIG_SIZE,
+        .global_config_func = v1_7_global_config_func,
+        .profile_config_func = v1_7_profile_config_func,
+    },
 };
 
 // An assertion to remind us to bump the persistent configuration version, and
 // implement a migration function if there is a change to the configuration
 // type. Update the assertion when a new version is added.
-_Static_assert(MIGRATION_V1_6_GLOBAL_CONFIG_SIZE +
-                       NUM_PROFILES * MIGRATION_V1_6_PROFILE_CONFIG_SIZE ==
+_Static_assert(MIGRATION_V1_7_GLOBAL_CONFIG_SIZE +
+                       NUM_PROFILES * MIGRATION_V1_7_PROFILE_CONFIG_SIZE ==
                    offsetof(eeconfig_t, magic_end),
                "Invalid configuration size");
 
@@ -433,6 +456,85 @@ bool v1_6_profile_config_func(uint8_t profile, uint8_t *dst,
 
   // Copy the remaining profile fields.
   migration_memcpy(&dst, &src, NUM_KEYS + 9 + 1);
+
+  return true;
+}
+
+//--------------------------------------------------------------------+
+// v1.6 -> v1.7 Migration (uint16 travel + pointing_config)
+//--------------------------------------------------------------------+
+
+bool v1_7_global_config_func(uint8_t *dst, const uint8_t *src) {
+  if (((const eeconfig_t *)src)->version != 0x0106)
+    // Expected version v1.6
+    return false;
+
+  // Copy the previous global configuration, then append pointing defaults.
+  migration_memcpy(&dst, &src, MIGRATION_V1_6_GLOBAL_CONFIG_SIZE);
+  migration_assign_uint8_t(&dst, true);  // enabled
+  migration_assign_uint8_t(&dst, true);  // auto_mouse_layer_enabled
+  migration_assign_uint16_t(&dst, 0);    // cpi (0 = board default)
+
+  return true;
+}
+
+bool v1_7_profile_config_func(uint8_t profile, uint8_t *dst,
+                              const uint8_t *src) {
+  (void)profile;
+
+  // Copy keymap.
+  migration_memcpy(&dst, &src, NUM_LAYERS * NUM_KEYS);
+
+  // Expand actuation_map entries from uint8 domain to TRAVEL_UNITS.
+  for (uint32_t i = 0; i < NUM_KEYS; i++) {
+    const uint8_t actuation_point = *src++;
+    const uint8_t rt_down = *src++;
+    const uint8_t rt_up = *src++;
+    const uint8_t continuous = *src++;
+
+    migration_assign_uint16_t(&dst, distance_from_u8(actuation_point));
+    migration_assign_uint16_t(&dst, distance_from_u8(rt_down));
+    migration_assign_uint16_t(&dst, distance_from_u8(rt_up));
+    migration_assign_uint8_t(&dst, continuous);
+  }
+
+  // Expand advanced keys: bottom_out_point becomes uint16_t for Null Bind / DKS.
+  for (uint8_t i = 0; i < NUM_ADVANCED_KEYS; i++) {
+    const uint8_t layer = *src++;
+    const uint8_t key = *src++;
+    const uint8_t type = *src++;
+
+    migration_assign_uint8_t(&dst, layer);
+    migration_assign_uint8_t(&dst, key);
+    migration_assign_uint8_t(&dst, type);
+
+    if (type == AK_TYPE_NULL_BIND) {
+      const uint8_t secondary_key = *src++;
+      const uint8_t behavior = *src++;
+      const uint8_t bottom_out_point = *src++;
+      // Skip unused union tail in the old record.
+      src += MIGRATION_V1_6_ADVANCED_KEY_SIZE - 6;
+
+      migration_assign_uint8_t(&dst, secondary_key);
+      migration_assign_uint8_t(&dst, behavior);
+      migration_assign_uint16_t(&dst, distance_from_u8(bottom_out_point));
+      migration_memset(&dst, 0, MIGRATION_V1_7_ADVANCED_KEY_SIZE - 7);
+    } else if (type == AK_TYPE_DYNAMIC_KEYSTROKE) {
+      const uint32_t bindings = NUM_DYNAMIC_KEYSTROKE_MAX_BINDINGS;
+      migration_memcpy(&dst, &src, bindings * 2);
+      const uint8_t bottom_out_point = *src++;
+      migration_assign_uint16_t(&dst, distance_from_u8(bottom_out_point));
+    } else {
+      // Copy the old union payload and pad the extra byte.
+      migration_memcpy(&dst, &src, MIGRATION_V1_6_ADVANCED_KEY_SIZE - 3);
+      migration_memset(&dst, 0, 1);
+    }
+  }
+
+  // Copy macros + gamepad buttons/options + tick_rate.
+  migration_memcpy(&dst, &src,
+                   NUM_MACRO_NODES * MIGRATION_V1_6_MACRO_NODE_SIZE + NUM_KEYS +
+                       9 + 1);
 
   return true;
 }

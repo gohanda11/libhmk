@@ -253,7 +253,16 @@ build_flags.define("DEFAULT_KEYMAPS", utils.to_c_array(default_keymaps))
 if kb_json.actuation is not None:
     actuation = kb_json.actuation
     if actuation.actuation_point is not None:
-        build_flags.define("ACTUATION_POINT", actuation.actuation_point)
+        # FW reads DEFAULT_ACTUATION_POINT; keep the macro name aligned.
+        build_flags.define("DEFAULT_ACTUATION_POINT", actuation.actuation_point)
+
+# Nominal travel domain (0.01mm units). Default 400 (=4.00mm).
+travel_mm = kb_json.keyboard.travel_mm
+if travel_mm is not None:
+    travel_units = int(round(float(travel_mm) * 100.0))
+    if travel_units <= 0 or travel_units > 65535:
+        raise ValueError(f"travel_mm out of range: {travel_mm}")
+    build_flags.define("TRAVEL_UNITS", travel_units)
 
 # Split Keyboard Configuration
 if kb_json.split is not None and kb_json.split.enabled:
