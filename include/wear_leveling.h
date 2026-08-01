@@ -39,10 +39,6 @@ _Static_assert(WL_BACKING_STORE_SIZE <= FLASH_SIZE,
 // Wear Leveling Log Format Version
 //--------------------------------------------------------------------+
 
-// Current log format version. Bumped whenever the interpretation of a log
-// entry changes (e.g. the WL_FIRST_WORD_DATA_BYTES fix).
-#define WL_LOG_FORMAT_VERSION 2
-
 // Magic value stored immediately after the consolidated CRC. The write log
 // only follows this marker; if it is missing or different, the log is treated
 // as an old/unknown format and is discarded on the next boot.
