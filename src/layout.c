@@ -427,6 +427,10 @@ void layout_set_auto_mouse_layer(uint8_t layer) {
   if (!auto_mouse_enabled || !eeconfig->pointing_config.auto_mouse_layer_enabled)
     return;
 
+  // Defensive range check to avoid invalid layer_mask shifts and keymap refs.
+  if (layer >= NUM_LAYERS)
+    return;
+
   auto_mouse_layer = layer;
   auto_mouse_timeout = timer_read();
   if (!auto_mouse_active) {

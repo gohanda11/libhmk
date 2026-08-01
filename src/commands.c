@@ -539,6 +539,7 @@ static void command_process(void) {
     COMMAND_VERIFY(p->cpi >= PMW3610_MIN_CPI && p->cpi <= PMW3610_MAX_CPI);
     // PMW3610 hardware / make.py both require 200 CPI steps.
     COMMAND_VERIFY((p->cpi % 200) == 0);
+    COMMAND_VERIFY(p->auto_mouse_layer < NUM_LAYERS);
 
     pointing_config_t cfg = {
         .enabled = p->enabled != 0,
