@@ -60,6 +60,12 @@ typedef union __attribute__((packed)) {
 _Static_assert(sizeof(wl_log_entry_t) == WL_LOG_ENTRY_SIZE,
                "wl_log_entry_t must be 8 bytes.");
 
+// Number of data bytes stored in the first 32-bit word of a log entry.
+// The bit field (addr + len) occupies the leading bytes, so the remaining
+// bytes of the first word can hold data. The second word always holds 4
+// data bytes, hence the first word holds the remainder.
+#define WL_FIRST_WORD_DATA_BYTES (WL_MAX_BYTES_PER_ENTRY - 4)
+
 //--------------------------------------------------------------------+
 // Wear Leveling Cache
 //--------------------------------------------------------------------+

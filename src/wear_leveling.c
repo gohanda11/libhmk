@@ -180,7 +180,7 @@ static wear_leveling_status_t wear_leveling_replay_log(void) {
       break;
     }
 
-    if (entry.fields.len > 2) {
+    if (entry.fields.len > WL_FIRST_WORD_DATA_BYTES) {
       // More data in the second word
       if (!wear_leveling_flash_read(addr, &entry.raw[1], 1)) {
         status = WL_STATUS_FAILED;
@@ -231,7 +231,7 @@ wear_leveling_write_raw(uint32_t addr, const void *buf, uint32_t len) {
       // consolidated data so no need to continue the write operation.
       return status;
 
-    if (write_len > 2) {
+    if (write_len > WL_FIRST_WORD_DATA_BYTES) {
       // More data in the second word
       status = wear_leveling_append(entry.raw[1]);
       if (status != WL_STATUS_OK)

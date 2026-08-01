@@ -152,6 +152,9 @@ typedef struct __attribute__((packed)) {
   bool continuous;
 } actuation_t;
 
+_Static_assert(sizeof(actuation_t) == 7,
+               "actuation_t must be 7 bytes.");
+
 // Advanced key types
 typedef enum {
   AK_TYPE_NONE = 0,
