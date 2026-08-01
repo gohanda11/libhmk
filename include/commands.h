@@ -108,6 +108,7 @@ typedef struct __attribute__((packed)) {
   uint8_t enabled;
   uint8_t auto_mouse_layer_enabled;
   uint16_t cpi;
+  uint8_t auto_mouse_layer;
 } command_in_pointing_config_t;
 
 typedef struct __attribute__((packed)) {
@@ -236,6 +237,7 @@ typedef struct __attribute__((packed)) {
   uint8_t enabled;
   uint8_t auto_mouse_layer_enabled;
   uint16_t cpi;
+  uint8_t auto_mouse_layer;
 } command_out_pointing_config_t;
 
 typedef struct __attribute__((packed)) {

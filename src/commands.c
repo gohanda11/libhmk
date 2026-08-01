@@ -521,6 +521,7 @@ static void command_process(void) {
     out->pointing_config.auto_mouse_layer_enabled =
         cfg->auto_mouse_layer_enabled ? 1 : 0;
     out->pointing_config.cpi = cfg->cpi;
+    out->pointing_config.auto_mouse_layer = cfg->auto_mouse_layer;
 #else
     out->pointing_config.supported = 0;
     out->pointing_config.side = 0;
@@ -528,6 +529,7 @@ static void command_process(void) {
     out->pointing_config.auto_mouse_layer_enabled =
         eeconfig->pointing_config.auto_mouse_layer_enabled ? 1 : 0;
     out->pointing_config.cpi = eeconfig->pointing_config.cpi;
+    out->pointing_config.auto_mouse_layer = eeconfig->pointing_config.auto_mouse_layer;
 #endif
     break;
   }
@@ -542,6 +544,7 @@ static void command_process(void) {
         .enabled = p->enabled != 0,
         .auto_mouse_layer_enabled = p->auto_mouse_layer_enabled != 0,
         .cpi = p->cpi,
+        .auto_mouse_layer = p->auto_mouse_layer,
     };
     success = EECONFIG_WRITE(pointing_config, &cfg);
     if (success)

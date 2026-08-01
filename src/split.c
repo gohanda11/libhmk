@@ -445,6 +445,7 @@ static void split_queue_pointing_config_from_eeconfig(void) {
   pending_pointing_config_payload.auto_mouse_layer_enabled =
       cfg->auto_mouse_layer_enabled ? 1 : 0;
   pending_pointing_config_payload.cpi = cfg->cpi;
+  pending_pointing_config_payload.auto_mouse_layer = cfg->auto_mouse_layer;
   pending_pointing_config = true;
 }
 #endif
@@ -816,6 +817,7 @@ static void split_slave_task(void) {
               .auto_mouse_layer_enabled =
                   cfg_payload->auto_mouse_layer_enabled != 0,
               .cpi = cfg_payload->cpi,
+              .auto_mouse_layer = cfg_payload->auto_mouse_layer,
           };
           // Slave applies sensor settings only; EEPROM lives on the master.
           pointing_device_apply_local(&cfg);
@@ -952,7 +954,8 @@ bool split_send_control_command(uint8_t command) {
 
 bool split_send_pointing_config(uint8_t enabled,
                                 uint8_t auto_mouse_layer_enabled,
-                                uint16_t cpi) {
+                                uint16_t cpi,
+                                uint8_t auto_mouse_layer) {
 #if defined(POINTING_DEVICE_ENABLED)
   if (!is_master)
     return false;
@@ -961,12 +964,14 @@ bool split_send_pointing_config(uint8_t enabled,
   pending_pointing_config_payload.auto_mouse_layer_enabled =
       auto_mouse_layer_enabled ? 1 : 0;
   pending_pointing_config_payload.cpi = cpi;
+  pending_pointing_config_payload.auto_mouse_layer = auto_mouse_layer;
   pending_pointing_config = true;
   return true;
 #else
   (void)enabled;
   (void)auto_mouse_layer_enabled;
   (void)cpi;
+  (void)auto_mouse_layer;
   return false;
 #endif
 }

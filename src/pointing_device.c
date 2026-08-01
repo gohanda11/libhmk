@@ -147,7 +147,8 @@ void pointing_device_set_config(const pointing_config_t *cfg) {
   if (!POINTING_DEVICE_ON_THIS_HALF) {
     split_send_pointing_config(runtime_config.enabled,
                                runtime_config.auto_mouse_layer_enabled,
-                               runtime_config.cpi);
+                               runtime_config.cpi,
+                               runtime_config.auto_mouse_layer);
   }
 #endif
 }
@@ -204,7 +205,7 @@ void pointing_device_task(void) {
     // Enable AML from the USB master's combined motion so slave-side sensor
     // movement reaches the half that owns layer state / HID.
     if (total_dx != 0 || total_dy != 0)
-      layout_set_auto_mouse_layer(POINTING_DEVICE_AUTO_MOUSE_LAYER);
+      layout_set_auto_mouse_layer(runtime_config.auto_mouse_layer);
 #endif
     pointing_device_send_hid(total_dx, total_dy);
   }
@@ -215,7 +216,7 @@ void pointing_device_task(void) {
   local_dy = 0;
 #if defined(POINTING_DEVICE_AUTO_MOUSE_LAYER)
   if (total_dx != 0 || total_dy != 0)
-    layout_set_auto_mouse_layer(POINTING_DEVICE_AUTO_MOUSE_LAYER);
+    layout_set_auto_mouse_layer(runtime_config.auto_mouse_layer);
 #endif
   pointing_device_send_hid(total_dx, total_dy);
 #endif

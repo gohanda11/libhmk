@@ -133,6 +133,7 @@ static uint8_t active_advanced_keys[NUM_KEYS];
 void layout_init(void) {
 #if defined(POINTING_DEVICE_AUTO_MOUSE_LAYER)
   auto_mouse_enabled = eeconfig->pointing_config.auto_mouse_layer_enabled;
+  auto_mouse_layer = DEFAULT_POINTING_AUTO_MOUSE_LAYER;
 #endif
   layout_load_advanced_keys();
 }

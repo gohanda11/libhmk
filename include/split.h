@@ -176,12 +176,14 @@ bool split_send_control_command(uint8_t command);
  * @param enabled Sensor enable flag
  * @param auto_mouse_layer_enabled Auto mouse layer enable flag
  * @param cpi CPI value
+ * @param auto_mouse_layer Auto mouse layer index
  *
  * @return true if queued, false otherwise
  */
 bool split_send_pointing_config(uint8_t enabled,
                                 uint8_t auto_mouse_layer_enabled,
-                                uint16_t cpi);
+                                uint16_t cpi,
+                                uint8_t auto_mouse_layer);
 
 /**
  * @brief Force one master split transaction

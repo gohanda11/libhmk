@@ -65,6 +65,7 @@ typedef struct __attribute__((packed)) {
   bool enabled;
   bool auto_mouse_layer_enabled;
   uint16_t cpi;
+  uint8_t auto_mouse_layer;
 } pointing_config_t;
 
 // Keyboard profile configuration
@@ -188,6 +189,14 @@ extern const eeconfig_t *eeconfig;
 #endif
 #endif
 
+#if !defined(DEFAULT_POINTING_AUTO_MOUSE_LAYER)
+#if defined(POINTING_DEVICE_AUTO_MOUSE_LAYER)
+#define DEFAULT_POINTING_AUTO_MOUSE_LAYER POINTING_DEVICE_AUTO_MOUSE_LAYER
+#else
+#define DEFAULT_POINTING_AUTO_MOUSE_LAYER 0
+#endif
+#endif
+
 #if !defined(DEFAULT_POINTING_CONFIG)
 // Default pointing configuration follows keyboard.json build-time values.
 #define DEFAULT_POINTING_CONFIG                                                \
@@ -195,6 +204,7 @@ extern const eeconfig_t *eeconfig;
       .enabled = true,                                                         \
       .auto_mouse_layer_enabled = DEFAULT_POINTING_AUTO_MOUSE_LAYER_ENABLED,   \
       .cpi = DEFAULT_POINTING_CPI,                                             \
+      .auto_mouse_layer = DEFAULT_POINTING_AUTO_MOUSE_LAYER,                   \
   }
 #endif
 

@@ -122,6 +122,7 @@ typedef struct __attribute__((packed)) {
   uint8_t enabled;
   uint8_t auto_mouse_layer_enabled;
   uint16_t cpi;
+  uint8_t auto_mouse_layer;
 } split_pointing_config_payload_t;
 
 //--------------------------------------------------------------------+
