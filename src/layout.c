@@ -152,8 +152,8 @@ void layout_load_advanced_keys(void) {
   for (uint32_t i = 0; i < NUM_ADVANCED_KEYS; i++) {
     const advanced_key_t *ak = &current_profile->advanced_keys[i];
 
-    if (ak->type == AK_TYPE_NONE || ak->layer >= NUM_LAYERS ||
-        ak->key >= NUM_KEYS)
+    if (ak->type == AK_TYPE_NONE || ak->type >= AK_TYPE_COUNT ||
+        ak->layer >= NUM_LAYERS || ak->key >= NUM_KEYS)
       continue;
 
     advanced_key_indices[ak->layer][ak->key] = i + 1;

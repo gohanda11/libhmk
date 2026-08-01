@@ -117,6 +117,17 @@ bool wear_leveling_consolidate(void);
 bool wear_leveling_erase(void);
 
 /**
+ * @brief Check whether the consolidated data is trustworthy
+ *
+ * Returns true only when the consolidated data passed the CRC check and the
+ * write-log format marker matched during the last initialization. Callers
+ * should treat a false result as a request for a factory reset.
+ *
+ * @return true if the consolidated data is valid, false otherwise
+ */
+bool wear_leveling_has_valid_consolidated(void);
+
+/**
  * @brief Read data from the virtual storage
  *
  * @param addr Address to read from

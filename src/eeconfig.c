@@ -60,7 +60,8 @@ void eeconfig_init(void) {
     default_profile.actuation_map[i].actuation_point = DEFAULT_ACTUATION_POINT;
 
   eeconfig = (const eeconfig_t *)wl_cache;
-  if (!eeconfig_is_latest_version() && !migration_try_migrate())
+  if (!wear_leveling_has_valid_consolidated() ||
+      (!eeconfig_is_latest_version() && !migration_try_migrate()))
     eeconfig_reset();
 }
 

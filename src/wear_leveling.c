@@ -39,6 +39,11 @@ _Static_assert(WL_LOG_START_ADDR <= WL_BACKING_STORE_SIZE,
 uint8_t wl_cache[WL_VIRTUAL_SIZE];
 uint32_t wl_log_discard_count = 0;
 
+// True only when the consolidated data passed the CRC check and the write log
+// format marker matched on the last init. If false, the caller should treat the
+// virtual storage as freshly erased and perform a factory reset.
+static bool wl_has_valid_consolidated = false;
+
 static uint32_t starting_sector;
 static uint32_t base_address;
 static uint32_t write_address;
@@ -275,6 +280,7 @@ void wear_leveling_init(void) {
   }
   base_address = FLASH_SIZE - reserved_size;
   wear_leveling_clear_cache();
+  wl_has_valid_consolidated = false;
 
   wear_leveling_status_t status = wear_leveling_read_consolidated();
   if (status != WL_STATUS_FAILED) {
@@ -284,11 +290,14 @@ void wear_leveling_init(void) {
     uint32_t version = ~WL_LOG_FORMAT_VERSION_MAGIC;
     if (!wear_leveling_flash_read(WL_LOG_FORMAT_VERSION_ADDR, &version, 1) ||
         version != WL_LOG_FORMAT_VERSION_MAGIC) {
-      // Discard the incompatible log and checkpoint the consolidated data with
-      // the current format version.
-      status = wear_leveling_consolidate_force();
+      // The consolidated data may have been produced by a broken build that
+      // wrote a valid-looking CRC but corrupted contents. Do not trust it:
+      // erase the entire backing store and let the caller perform a factory
+      // reset.
+      status = wear_leveling_erase();
       wl_log_discard_count++;
     } else {
+      wl_has_valid_consolidated = true;
       status = wear_leveling_replay_log();
     }
   } else {
@@ -298,6 +307,10 @@ void wear_leveling_init(void) {
 
   if (status == WL_STATUS_FAILED)
     board_error_handler();
+}
+
+bool wear_leveling_has_valid_consolidated(void) {
+  return wl_has_valid_consolidated;
 }
 
 bool wear_leveling_consolidate(void) {
