@@ -99,10 +99,29 @@ void pointing_device_init(void) {
   pointing_device_clear_deltas();
   pmw3610_initialized = false;
   init_attempts = 0;
+#if defined(SPLIT_KEYBOARD)
+  if (split_is_master()) {
+    runtime_config = eeconfig->pointing_config;
+  } else {
+    runtime_config = (pointing_config_t)DEFAULT_POINTING_CONFIG;
+  }
+#else
   runtime_config = eeconfig->pointing_config;
+#endif
   runtime_config.cpi = pointing_device_effective_cpi(runtime_config.cpi);
   runtime_config_valid = true;
   pointing_device_apply_layout_config();
+
+#if defined(SPLIT_KEYBOARD)
+  // Relay the persisted configuration to the slave half at boot so the slave
+  // does not keep the build-time defaults when the sensor lives on the slave.
+  if (split_is_master() && !POINTING_DEVICE_ON_THIS_HALF) {
+    split_send_pointing_config(runtime_config.enabled,
+                               runtime_config.auto_mouse_layer_enabled,
+                               runtime_config.cpi,
+                               runtime_config.auto_mouse_layer);
+  }
+#endif
 }
 
 void pointing_device_apply_local(const pointing_config_t *cfg) {

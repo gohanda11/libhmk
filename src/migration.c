@@ -81,9 +81,14 @@ static bool v1_7_global_config_func(uint8_t *dst, const uint8_t *src);
 static bool v1_7_profile_config_func(uint8_t profile, uint8_t *dst,
                                      const uint8_t *src);
 
-// v1.7: uint16 travel domain + pointing_config device field.
+static bool v1_8_global_config_func(uint8_t *dst, const uint8_t *src);
+static bool v1_8_profile_config_func(uint8_t profile, uint8_t *dst,
+                                     const uint8_t *src);
+
+// v1.7: uint16 travel domain + 4-byte pointing_config device field.
+#define MIGRATION_V1_7_POINTING_CONFIG_SIZE 4
 #define MIGRATION_V1_7_GLOBAL_CONFIG_SIZE                                      \
-  (MIGRATION_V1_6_GLOBAL_CONFIG_SIZE + sizeof(pointing_config_t))
+  (MIGRATION_V1_6_GLOBAL_CONFIG_SIZE + MIGRATION_V1_7_POINTING_CONFIG_SIZE)
 #define MIGRATION_V1_7_ACTUATION_SIZE 7
 #define MIGRATION_V1_7_ADVANCED_KEY_SIZE                                       \
   (3 + 2 * NUM_DYNAMIC_KEYSTROKE_MAX_BINDINGS + 2)
@@ -91,6 +96,11 @@ static bool v1_7_profile_config_func(uint8_t profile, uint8_t *dst,
   (NUM_LAYERS * NUM_KEYS + NUM_KEYS * MIGRATION_V1_7_ACTUATION_SIZE +          \
    NUM_ADVANCED_KEYS * MIGRATION_V1_7_ADVANCED_KEY_SIZE +                      \
    NUM_MACRO_NODES * MIGRATION_V1_6_MACRO_NODE_SIZE + NUM_KEYS + 9 + 1)
+
+// v1.8: add auto_mouse_layer to pointing_config.
+#define MIGRATION_V1_8_GLOBAL_CONFIG_SIZE                                      \
+  (MIGRATION_V1_7_GLOBAL_CONFIG_SIZE + 1)
+#define MIGRATION_V1_8_PROFILE_CONFIG_SIZE MIGRATION_V1_7_PROFILE_CONFIG_SIZE
 
 
 // Migration metadata for each configuration version. The first entry is
@@ -150,13 +160,20 @@ static const migration_t migrations[] = {
         .global_config_func = v1_7_global_config_func,
         .profile_config_func = v1_7_profile_config_func,
     },
+    {
+        .version = 0x0108,
+        .global_config_size = MIGRATION_V1_8_GLOBAL_CONFIG_SIZE,
+        .profile_config_size = MIGRATION_V1_8_PROFILE_CONFIG_SIZE,
+        .global_config_func = v1_8_global_config_func,
+        .profile_config_func = v1_8_profile_config_func,
+    },
 };
 
 // An assertion to remind us to bump the persistent configuration version, and
 // implement a migration function if there is a change to the configuration
 // type. Update the assertion when a new version is added.
-_Static_assert(MIGRATION_V1_7_GLOBAL_CONFIG_SIZE +
-                       NUM_PROFILES * MIGRATION_V1_7_PROFILE_CONFIG_SIZE ==
+_Static_assert(MIGRATION_V1_8_GLOBAL_CONFIG_SIZE +
+                       NUM_PROFILES * MIGRATION_V1_8_PROFILE_CONFIG_SIZE ==
                    offsetof(eeconfig_t, magic_end),
                "Invalid configuration size");
 
@@ -543,6 +560,34 @@ bool v1_7_profile_config_func(uint8_t profile, uint8_t *dst,
   migration_memcpy(&dst, &src,
                    NUM_MACRO_NODES * MIGRATION_V1_6_MACRO_NODE_SIZE + NUM_KEYS +
                        9 + 1);
+
+  return true;
+}
+
+//--------------------------------------------------------------------+
+// v1.7 -> v1.8 Migration (pointing_config auto_mouse_layer)
+//--------------------------------------------------------------------+
+
+bool v1_8_global_config_func(uint8_t *dst, const uint8_t *src) {
+  if (((const eeconfig_t *)src)->version != 0x0107)
+    // Expected version v1.7
+    return false;
+
+  // Copy the whole v1.7 global config. The old pointing_config_t was 4 bytes;
+  // the new one is 5 bytes with the appended auto_mouse_layer field.
+  migration_memcpy(&dst, &src, MIGRATION_V1_7_GLOBAL_CONFIG_SIZE);
+  // Default auto_mouse_layer comes from the build-time keyboard definition.
+  migration_assign_uint8_t(&dst, DEFAULT_POINTING_AUTO_MOUSE_LAYER);
+
+  return true;
+}
+
+bool v1_8_profile_config_func(uint8_t profile, uint8_t *dst,
+                              const uint8_t *src) {
+  (void)profile;
+
+  // Profiles are unchanged in v1.8.
+  migration_memcpy(&dst, &src, MIGRATION_V1_7_PROFILE_CONFIG_SIZE);
 
   return true;
 }
