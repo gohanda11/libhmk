@@ -191,6 +191,7 @@ bool migration_try_migrate(void) {
   // We alternate between two buffers to save the memory.
   uint8_t current_buf = 0;
   uint8_t bufs[2][sizeof(eeconfig_t)];
+  bool migrated = false;
 
   // Let `bufs[0]` be the current configuration.
   memcpy(bufs[0], eeconfig, sizeof(eeconfig_t));
@@ -202,6 +203,8 @@ bool migration_try_migrate(void) {
     if (m->version <= config_version)
       // Skip migrations that are not applicable
       continue;
+
+    migrated = true;
 
     const uint8_t *src = bufs[current_buf];
     uint8_t *dst = bufs[current_buf ^ 1];
@@ -231,9 +234,21 @@ bool migration_try_migrate(void) {
   }
 
   // Make sure the configuration is valid after migration
-  ((eeconfig_t *)bufs[current_buf])->magic_end = EECONFIG_MAGIC_END;
+  eeconfig_t *final = (eeconfig_t *)bufs[current_buf];
+  final->magic_end = EECONFIG_MAGIC_END;
+
+  // Avoid unnecessary flash writes when the configuration is already up to
+  // date and intact.
+  if (!migrated && final->magic_end == eeconfig->magic_end)
+    return true;
+
   // We reflect the update in the flash.
-  return wear_leveling_write(0, &bufs[current_buf], sizeof(eeconfig_t));
+  if (!wear_leveling_write(0, final, sizeof(eeconfig_t)))
+    return false;
+
+  // Checkpoint the migrated configuration so it does not linger in the write
+  // log and cause an old-format replay on a future downgrade/upgrade cycle.
+  return wear_leveling_consolidate();
 }
 
 //--------------------------------------------------------------------+

@@ -141,9 +141,16 @@ void layout_init(void) {
 void layout_load_advanced_keys(void) {
   advanced_key_init();
 
+  // Guard against a corrupted current_profile index. An out-of-range value
+  // would otherwise cause a HardFault when indexing eeconfig->profiles.
+  uint8_t profile = eeconfig->current_profile;
+  if (profile >= NUM_PROFILES)
+    profile = 0;
+  const eeconfig_profile_t *current_profile = &eeconfig->profiles[profile];
+
   memset(advanced_key_indices, 0, sizeof(advanced_key_indices));
   for (uint32_t i = 0; i < NUM_ADVANCED_KEYS; i++) {
-    const advanced_key_t *ak = &CURRENT_PROFILE.advanced_keys[i];
+    const advanced_key_t *ak = &current_profile->advanced_keys[i];
 
     if (ak->type == AK_TYPE_NONE || ak->layer >= NUM_LAYERS ||
         ak->key >= NUM_KEYS)

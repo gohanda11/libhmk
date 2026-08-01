@@ -36,6 +36,22 @@ _Static_assert(WL_BACKING_STORE_SIZE <= FLASH_SIZE,
                "The wear leveling backing store must fit in flash.");
 
 //--------------------------------------------------------------------+
+// Wear Leveling Log Format Version
+//--------------------------------------------------------------------+
+
+// Current log format version. Bumped whenever the interpretation of a log
+// entry changes (e.g. the WL_FIRST_WORD_DATA_BYTES fix).
+#define WL_LOG_FORMAT_VERSION 2
+
+// Magic value stored immediately after the consolidated CRC. The write log
+// only follows this marker; if it is missing or different, the log is treated
+// as an old/unknown format and is discarded on the next boot.
+#define WL_LOG_FORMAT_VERSION_MAGIC 0x574C0002UL
+
+// Number of times the write log was discarded because of a format mismatch.
+extern uint32_t wl_log_discard_count;
+
+//--------------------------------------------------------------------+
 // Wear Leveling Write Log Entry
 //--------------------------------------------------------------------+
 
@@ -85,6 +101,17 @@ extern uint8_t wl_cache[];
  * @return None
  */
 void wear_leveling_init(void);
+
+/**
+ * @brief Force a consolidated checkpoint of the virtual storage
+ *
+ * This writes the current cache to flash, updates the CRC and log-format
+ * version marker, and clears the write log. It is used after bulk writes
+ * (e.g. configuration migration) so the result does not remain in the log.
+ *
+ * @return true if successful, false otherwise
+ */
+bool wear_leveling_consolidate(void);
 
 /**
  * @brief Erase the virtual storage

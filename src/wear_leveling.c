@@ -28,10 +28,16 @@ typedef enum {
 
 // Reserve 4 bytes of CRC32 checksum for the consolidated data
 #define WL_CRC_ADDR WL_VIRTUAL_SIZE
-// The write log starts after the CRC32 checksum.
-#define WL_LOG_START_ADDR (WL_CRC_ADDR + 4)
+// Reserve 4 bytes for the write log format version marker after the CRC.
+#define WL_LOG_FORMAT_VERSION_ADDR (WL_CRC_ADDR + 4)
+// The write log starts after the format version marker.
+#define WL_LOG_START_ADDR (WL_LOG_FORMAT_VERSION_ADDR + 4)
+
+_Static_assert(WL_LOG_START_ADDR <= WL_BACKING_STORE_SIZE,
+               "The write log must fit in the backing store.");
 
 uint8_t wl_cache[WL_VIRTUAL_SIZE];
+uint32_t wl_log_discard_count = 0;
 
 static uint32_t starting_sector;
 static uint32_t base_address;
@@ -67,7 +73,8 @@ static void wear_leveling_clear_cache(void) {
   uint32_t *wl_cache32 = (uint32_t *)wl_cache;
   for (uint32_t i = 0; i < WL_VIRTUAL_SIZE / 4; i++)
     wl_cache32[i] = FLASH_EMPTY_VAL;
-  // Skip the 4 bytes reserved for the CRC32 checksum of the consolidated data.
+  // Skip the CRC32 checksum and log format version marker of the consolidated
+  // data; the next append starts the write log.
   write_address = WL_LOG_START_ADDR;
 }
 
@@ -123,6 +130,14 @@ static wear_leveling_status_t wear_leveling_write_consolidated(void) {
 
     if (!wear_leveling_flash_write(WL_CRC_ADDR, &checksum, 1))
       status = WL_STATUS_FAILED;
+
+    if (status != WL_STATUS_FAILED) {
+      // Write the log format version marker so future boots can safely replay
+      // the log that follows.
+      const uint32_t version = WL_LOG_FORMAT_VERSION_MAGIC;
+      if (!wear_leveling_flash_write(WL_LOG_FORMAT_VERSION_ADDR, &version, 1))
+        status = WL_STATUS_FAILED;
+    }
   }
 
   return status;
@@ -262,14 +277,31 @@ void wear_leveling_init(void) {
   wear_leveling_clear_cache();
 
   wear_leveling_status_t status = wear_leveling_read_consolidated();
-  if (status != WL_STATUS_FAILED)
-    status = wear_leveling_replay_log();
-  else
+  if (status != WL_STATUS_FAILED) {
+    // Before replaying the log, make sure it uses the expected format. An old
+    // or unknown format (e.g. pre-WL_FIRST_WORD_DATA_BYTES-fix entries) would
+    // otherwise shift the log parsing and corrupt wl_cache.
+    uint32_t version = ~WL_LOG_FORMAT_VERSION_MAGIC;
+    if (!wear_leveling_flash_read(WL_LOG_FORMAT_VERSION_ADDR, &version, 1) ||
+        version != WL_LOG_FORMAT_VERSION_MAGIC) {
+      // Discard the incompatible log and checkpoint the consolidated data with
+      // the current format version.
+      status = wear_leveling_consolidate_force();
+      wl_log_discard_count++;
+    } else {
+      status = wear_leveling_replay_log();
+    }
+  } else {
     // If the consolidated data is corrupted, we clear the virtual storage
     status = wear_leveling_erase();
+  }
 
   if (status == WL_STATUS_FAILED)
     board_error_handler();
+}
+
+bool wear_leveling_consolidate(void) {
+  return wear_leveling_consolidate_force() != WL_STATUS_FAILED;
 }
 
 bool wear_leveling_erase(void) {
