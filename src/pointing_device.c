@@ -46,6 +46,20 @@ static uint16_t pointing_device_effective_cpi(uint16_t cpi) {
   return cpi;
 }
 
+// Load the persisted pointing configuration, falling back to the build-time
+// defaults and repairing the EEPROM copy when the persisted value fails
+// validation. Pointing configuration is persisted on the master half only.
+static void pointing_device_load_config(void) {
+  if (pointing_config_is_valid(&eeconfig->pointing_config)) {
+    runtime_config = eeconfig->pointing_config;
+  } else {
+    runtime_config = (pointing_config_t)DEFAULT_POINTING_CONFIG;
+    EECONFIG_WRITE(pointing_config, &runtime_config);
+  }
+  runtime_config.cpi = pointing_device_effective_cpi(runtime_config.cpi);
+  runtime_config_valid = true;
+}
+
 static void pointing_device_clear_deltas(void) {
   local_dx = 0;
   local_dy = 0;
@@ -101,15 +115,15 @@ void pointing_device_init(void) {
   init_attempts = 0;
 #if defined(SPLIT_KEYBOARD)
   if (split_is_master()) {
-    runtime_config = eeconfig->pointing_config;
+    pointing_device_load_config();
   } else {
     runtime_config = (pointing_config_t)DEFAULT_POINTING_CONFIG;
+    runtime_config.cpi = pointing_device_effective_cpi(runtime_config.cpi);
+    runtime_config_valid = true;
   }
 #else
-  runtime_config = eeconfig->pointing_config;
+  pointing_device_load_config();
 #endif
-  runtime_config.cpi = pointing_device_effective_cpi(runtime_config.cpi);
-  runtime_config_valid = true;
   pointing_device_apply_layout_config();
 
 #if defined(SPLIT_KEYBOARD)
@@ -128,7 +142,13 @@ void pointing_device_apply_local(const pointing_config_t *cfg) {
   if (cfg == NULL)
     return;
 
-  runtime_config = *cfg;
+  if (pointing_config_is_valid(cfg)) {
+    runtime_config = *cfg;
+  } else {
+    // Never feed an invalid configuration (e.g. a corrupt split relay payload)
+    // to the sensor or layout; fall back to the build-time defaults.
+    runtime_config = (pointing_config_t)DEFAULT_POINTING_CONFIG;
+  }
   runtime_config.cpi = pointing_device_effective_cpi(runtime_config.cpi);
   runtime_config_valid = true;
   pointing_device_apply_layout_config();
@@ -154,11 +174,8 @@ void pointing_device_set_config(const pointing_config_t *cfg) {
 }
 
 const pointing_config_t *pointing_device_get_config(void) {
-  if (!runtime_config_valid) {
-    runtime_config = eeconfig->pointing_config;
-    runtime_config.cpi = pointing_device_effective_cpi(runtime_config.cpi);
-    runtime_config_valid = true;
-  }
+  if (!runtime_config_valid)
+    pointing_device_load_config();
   return &runtime_config;
 }
 

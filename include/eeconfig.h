@@ -213,6 +213,20 @@ extern const eeconfig_t *eeconfig;
 //--------------------------------------------------------------------+
 
 /**
+ * @brief Check whether a pointing configuration holds supported values
+ *
+ * Validates every field of a pointing configuration as read from persistent
+ * storage or received over the split link: the boolean flags must be 0 or 1,
+ * the CPI must be in the PMW3610-supported range (200-3200) in 200 CPI steps,
+ * and the auto-mouse layer must exist.
+ *
+ * @param cfg Configuration to validate
+ *
+ * @return true if the configuration is valid, false otherwise
+ */
+bool pointing_config_is_valid(const pointing_config_t *cfg);
+
+/**
  * @brief Initialize the persistent configuration module
  *
  * @return None

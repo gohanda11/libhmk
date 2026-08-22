@@ -17,6 +17,7 @@
 
 #include "keycodes.h"
 #include "migration.h"
+#include "sensors/pmw3610.h"
 
 const eeconfig_t *eeconfig;
 
@@ -54,6 +55,28 @@ static bool eeconfig_is_latest_version(void) {
          eeconfig->version == EECONFIG_VERSION;
 }
 
+bool pointing_config_is_valid(const pointing_config_t *cfg) {
+  if (cfg == NULL)
+    return false;
+
+  // The boolean flags are persisted as raw bytes, so a corrupted EEPROM value
+  // may be neither 0 nor 1. Inspect the storage instead of the _Bool value.
+  const uint8_t *raw = (const uint8_t *)cfg;
+  if (raw[offsetof(pointing_config_t, enabled)] > 1 ||
+      raw[offsetof(pointing_config_t, auto_mouse_layer_enabled)] > 1)
+    return false;
+
+  // CPI must be supported by the PMW3610 and quantized to 200 CPI steps.
+  if (cfg->cpi < PMW3610_MIN_CPI || cfg->cpi > PMW3610_MAX_CPI ||
+      (cfg->cpi % 200) != 0)
+    return false;
+
+  if (cfg->auto_mouse_layer >= NUM_LAYERS)
+    return false;
+
+  return true;
+}
+
 void eeconfig_init(void) {
   // Update default profile with its default values
   for (uint32_t i = 0; i < NUM_KEYS; i++)
@@ -63,6 +86,13 @@ void eeconfig_init(void) {
   if (!wear_leveling_has_valid_consolidated() ||
       (!eeconfig_is_latest_version() && !migration_try_migrate()))
     eeconfig_reset();
+
+  // Repair a corrupted pointing configuration so that every consumer observes
+  // valid values. layout_init() reads it before pointing_device_init() runs,
+  // so validation at the point of use alone is not enough. A fresh reset or
+  // migration already wrote the defaults, making this a no-op in that case.
+  if (!pointing_config_is_valid(&eeconfig->pointing_config))
+    EECONFIG_WRITE(pointing_config, &default_pointing_config);
 }
 
 // Helper macro for writing rvalue
