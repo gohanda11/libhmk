@@ -134,17 +134,10 @@ void pmw3610_set_cpi(uint16_t cpi) {
   else if (cpi > PMW3610_MAX_CPI)
     cpi = PMW3610_MAX_CPI;
 
+  // RES_STEP carries only the CPI resolution. Axis orientation
+  // (SWAP_XY/INVERT_X/INVERT_Y) is applied in software when reading motion;
+  // setting those bits here makes some sensor units stop tracking.
   uint8_t value = (uint8_t)(cpi / 200);
-
-#if defined(PMW3610_SWAP_XY)
-  value |= (1 << 7);
-#endif
-#if defined(PMW3610_INVERT_X)
-  value |= (1 << 6);
-#endif
-#if defined(PMW3610_INVERT_Y)
-  value |= (1 << 5);
-#endif
 
   pmw3610_spi_clock_on();
   pmw3610_write_reg_internal(PMW3610_REG_SPI_PAGE0, 0xFF);
@@ -247,7 +240,7 @@ bool pmw3610_init(void) {
   // Configure performance: run at 4 ms polling interval while awake
   pmw3610_write_reg(PMW3610_REG_PERFORMANCE, 0x0D);
 
-  // Configure CPI and axis orientation
+  // Configure CPI (axis orientation is applied in software on read)
   pmw3610_set_cpi(PMW3610_CPI);
 
   // Configure downshift and sample rates
@@ -291,6 +284,21 @@ bool pmw3610_read_motion(int16_t *dx, int16_t *dy) {
     x |= 0xF000;
   if (y & 0x0800)
     y |= 0xF000;
+
+  // Apply axis orientation in software (previously done by the sensor's
+  // RES_STEP bits). Swap first, then invert, matching the sensor hardware
+  // composition. Deltas are at most 12-bit so negation stays in range.
+#if defined(PMW3610_SWAP_XY)
+  const int16_t tmp = x;
+  x = y;
+  y = tmp;
+#endif
+#if defined(PMW3610_INVERT_X)
+  x = -x;
+#endif
+#if defined(PMW3610_INVERT_Y)
+  y = -y;
+#endif
 
   *dx = x;
   *dy = y;
