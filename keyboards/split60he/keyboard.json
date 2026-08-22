@@ -39,7 +39,7 @@
     "angle": 0,
     "swap_xy": false,
     "invert_x": false,
-    "invert_y": false,
+    "invert_y": true,
     "auto_mouse_layer": 3
   },
   "split": {
