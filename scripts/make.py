@@ -404,5 +404,8 @@ if kb_json.pointing_device is not None and kb_json.pointing_device.enabled:
     if pd.auto_mouse_layer >= 0:
         build_flags.define("POINTING_DEVICE_AUTO_MOUSE_LAYER", pd.auto_mouse_layer)
 
+    if pd.scroll_layer >= 0:
+        build_flags.define("POINTING_DEVICE_SCROLL_LAYER", pd.scroll_layer)
+
 # Add source build flags
 env.Append(BUILD_FLAGS=build_flags.get_flags())

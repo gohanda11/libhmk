@@ -121,5 +121,14 @@ void pointing_device_set_config(const pointing_config_t *cfg);
  * @return Pointer to the runtime configuration
  */
 const pointing_config_t *pointing_device_get_config(void);
+/**
+ * @brief Reload the pointing configuration from EEPROM and reapply it
+ *
+ * Called when this half is promoted to master, where the persisted
+ * configuration becomes authoritative.
+ *
+ * @return None
+ */
+void pointing_device_reload_config(void);
 #endif
 

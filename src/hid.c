@@ -95,8 +95,12 @@ static void hid_send_hid_report(uint8_t starting_report_id) {
       // sending while preserving button state for future comparisons.
       mouse_report.x = 0;
       mouse_report.y = 0;
+      mouse_report.wheel = 0;
+      mouse_report.pan = 0;
       prev_mouse_report.x = 0;
       prev_mouse_report.y = 0;
+      prev_mouse_report.wheel = 0;
+      prev_mouse_report.pan = 0;
       return;
 
     default:
@@ -218,6 +222,24 @@ void hid_mouse_move(int8_t x, int8_t y) {
 
   mouse_report.x = (int8_t)new_x;
   mouse_report.y = (int8_t)new_y;
+}
+
+void hid_mouse_scroll(int8_t wheel, int8_t pan) {
+  int16_t new_wheel = (int16_t)mouse_report.wheel + (int16_t)wheel;
+  int16_t new_pan = (int16_t)mouse_report.pan + (int16_t)pan;
+
+  if (new_wheel > 127)
+    new_wheel = 127;
+  else if (new_wheel < -128)
+    new_wheel = -128;
+
+  if (new_pan > 127)
+    new_pan = 127;
+  else if (new_pan < -128)
+    new_pan = -128;
+
+  mouse_report.wheel = (int8_t)new_wheel;
+  mouse_report.pan = (int8_t)new_pan;
 }
 
 void hid_send_mouse_report(void) {

@@ -214,3 +214,22 @@ if pd_enabled and pd.auto_mouse_layer >= kb.num_layers:
     raise ValueError(
         f"pointing_device.auto_mouse_layer ({pd.auto_mouse_layer}) must be less than keyboard.num_layers ({kb.num_layers})"
     )
+
+# The scroll layer must reference an existing layer.
+if pd_enabled and pd.scroll_layer >= kb.num_layers:
+    raise ValueError(
+        f"pointing_device.scroll_layer ({pd.scroll_layer}) must be less than keyboard.num_layers ({kb.num_layers})"
+    )
+
+# The auto mouse layer must not reference the scroll layer: while the scroll
+# layer is active every cursor move is sent as scroll input, so an auto mouse
+# layer on the same layer would never move the cursor.
+if (
+    pd_enabled
+    and pd.auto_mouse_layer >= 0
+    and pd.scroll_layer >= 0
+    and pd.scroll_layer == pd.auto_mouse_layer
+):
+    raise ValueError(
+        f"pointing_device.auto_mouse_layer ({pd.auto_mouse_layer}) must not equal pointing_device.scroll_layer ({pd.scroll_layer})"
+    )

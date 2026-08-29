@@ -219,6 +219,9 @@ class KeyboardPointingDevice(StrictBaseModel):
     invert_y: bool = False
     # Layer to temporarily activate when the sensor is moved (-1 to disable)
     auto_mouse_layer: int = Field(default=-1, ge=-1, le=7)
+    # While this layer is active, pointer movement is sent as scroll (wheel)
+    # input instead of cursor movement (-1 to disable)
+    scroll_layer: int = Field(default=-1, ge=-1, le=7)
 
 
 # keyboard.json Schema

@@ -163,6 +163,12 @@ static void split_promote_to_master(void) {
 #if defined(POINTING_DEVICE_ENABLED)
   pending_pointing_config = false;
   was_connected = false;
+  // pointing_device_init() may have run before USB enumeration settled the
+  // role, leaving the build-time defaults in place. The promoted half now
+  // owns the persisted configuration, so reload it from EEPROM; the first
+  // successful poll re-queues it to the slave half through the existing
+  // split_queue_pointing_config_from_eeconfig() relay.
+  pointing_device_reload_config();
 #endif
   slave_recalibrate_pending = false;
   local_layer_mask = 0;

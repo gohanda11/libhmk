@@ -102,6 +102,17 @@ static bool v1_8_profile_config_func(uint8_t profile, uint8_t *dst,
   (MIGRATION_V1_7_GLOBAL_CONFIG_SIZE + 1)
 #define MIGRATION_V1_8_PROFILE_CONFIG_SIZE MIGRATION_V1_7_PROFILE_CONFIG_SIZE
 
+static bool v1_9_global_config_func(uint8_t *dst, const uint8_t *src);
+static bool v1_9_profile_config_func(uint8_t profile, uint8_t *dst,
+                                     const uint8_t *src);
+
+// v1.9: rewrite the persisted auto_mouse_layer. The build-time default AML
+// number changed (to keep it off the scroll layer), so a value written by an
+// older build may equal POINTING_DEVICE_SCROLL_LAYER and turn every cursor
+// move into wheel ticks. The layout is otherwise unchanged.
+#define MIGRATION_V1_9_GLOBAL_CONFIG_SIZE MIGRATION_V1_8_GLOBAL_CONFIG_SIZE
+#define MIGRATION_V1_9_PROFILE_CONFIG_SIZE MIGRATION_V1_8_PROFILE_CONFIG_SIZE
+
 
 // Migration metadata for each configuration version. The first entry is
 // reserved for the initial version (v1.0) which does not require migration.
@@ -167,13 +178,20 @@ static const migration_t migrations[] = {
         .global_config_func = v1_8_global_config_func,
         .profile_config_func = v1_8_profile_config_func,
     },
+    {
+        .version = 0x0109,
+        .global_config_size = MIGRATION_V1_9_GLOBAL_CONFIG_SIZE,
+        .profile_config_size = MIGRATION_V1_9_PROFILE_CONFIG_SIZE,
+        .global_config_func = v1_9_global_config_func,
+        .profile_config_func = v1_9_profile_config_func,
+    },
 };
 
 // An assertion to remind us to bump the persistent configuration version, and
 // implement a migration function if there is a change to the configuration
 // type. Update the assertion when a new version is added.
-_Static_assert(MIGRATION_V1_8_GLOBAL_CONFIG_SIZE +
-                       NUM_PROFILES * MIGRATION_V1_8_PROFILE_CONFIG_SIZE ==
+_Static_assert(MIGRATION_V1_9_GLOBAL_CONFIG_SIZE +
+                       NUM_PROFILES * MIGRATION_V1_9_PROFILE_CONFIG_SIZE ==
                    offsetof(eeconfig_t, magic_end),
                "Invalid configuration size");
 
@@ -603,6 +621,38 @@ bool v1_8_profile_config_func(uint8_t profile, uint8_t *dst,
 
   // Profiles are unchanged in v1.8.
   migration_memcpy(&dst, &src, MIGRATION_V1_7_PROFILE_CONFIG_SIZE);
+
+  return true;
+}
+
+//--------------------------------------------------------------------+
+// v1.8 -> v1.9 Migration (auto_mouse_layer default correction)
+//--------------------------------------------------------------------+
+
+bool v1_9_global_config_func(uint8_t *dst, const uint8_t *src) {
+  if (((const eeconfig_t *)src)->version != 0x0108)
+    // Expected version v1.8
+    return false;
+
+  // Copy the whole v1.8 global config except the trailing auto_mouse_layer
+  // byte (pointing_config is the last global field and auto_mouse_layer is
+  // its last byte), then overwrite just that byte with the current build
+  // default. The build-time default AML number changed (scroll layer
+  // collision avoidance), so the persisted value may equal the scroll layer
+  // and swallow every cursor move; enabled/cpi/auto_mouse_layer_enabled stay
+  // as the user left them.
+  migration_memcpy(&dst, &src, MIGRATION_V1_8_GLOBAL_CONFIG_SIZE - 1);
+  migration_assign_uint8_t(&dst, DEFAULT_POINTING_AUTO_MOUSE_LAYER);
+
+  return true;
+}
+
+bool v1_9_profile_config_func(uint8_t profile, uint8_t *dst,
+                              const uint8_t *src) {
+  (void)profile;
+
+  // Profiles are unchanged in v1.9; keep the user keymaps/macros as-is.
+  migration_memcpy(&dst, &src, MIGRATION_V1_8_PROFILE_CONFIG_SIZE);
 
   return true;
 }

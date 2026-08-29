@@ -66,6 +66,16 @@ void hid_send_reports(void);
 void hid_mouse_move(int8_t x, int8_t y);
 
 /**
+ * @brief Add a mouse wheel/pan delta to the mouse HID report
+ *
+ * @param wheel Vertical wheel delta (int8_t range), positive scrolls up
+ * @param pan Horizontal wheel delta (int8_t range), positive scrolls right
+ *
+ * @return None
+ */
+void hid_mouse_scroll(int8_t wheel, int8_t pan);
+
+/**
  * @brief Send only the mouse HID report
  *
  * This is used for relative pointing-device motion, which must not wait for a

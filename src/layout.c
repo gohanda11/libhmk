@@ -57,7 +57,7 @@ static bool auto_mouse_enabled = true;
  *
  * @return Current layer
  */
-__attribute__((always_inline)) static inline uint8_t
+__attribute__((always_inline)) inline uint8_t
 layout_get_current_layer(void) {
   return layer_mask ? 31 - __builtin_clz(layer_mask) : default_layer;
 }

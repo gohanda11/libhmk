@@ -66,6 +66,16 @@ void layout_register(uint8_t key, uint8_t keycode);
 void layout_unregister(uint8_t key, uint8_t keycode);
 
 /**
+ * @brief Get the current layer
+ *
+ * The current layer is the highest layer that is currently active. If no
+ * layers are active, the default layer is returned.
+ *
+ * @return Current layer
+ */
+uint8_t layout_get_current_layer(void);
+
+/**
  * @brief Temporarily activate a layer while the pointing device is in use
  *
  * The layer will remain active until AUTO_MOUSE_TIMEOUT_MS has elapsed without
