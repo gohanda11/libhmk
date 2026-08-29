@@ -18,6 +18,7 @@
 #if defined(SPLIT_KEYBOARD)
 
 #include "at32f402_405.h"
+#include "hardware/board_api.h"
 #include "hardware/timer_api.h"
 
 //--------------------------------------------------------------------+
@@ -43,6 +44,16 @@
 // Maximum time in milliseconds to wait for the transmit buffer to become
 // empty or for transmission to complete before aborting the transfer.
 #define SPLIT_TRANSPORT_SEND_TIMEOUT_MS 10
+
+// Minimum gap in microseconds between consecutive frames on the shared line.
+// The receiver polls a 1-byte USART FIFO and needs time to CRC-check a frame
+// and copy it out before the next frame starts; back-to-back frames overrun
+// that FIFO and lose the next frame's leading bytes. The sender enforces this
+// gap, while the normal 2 ms polling period already exceeds it and adds no
+// delay.
+#ifndef SPLIT_TRANSPORT_INTER_FRAME_US
+#define SPLIT_TRANSPORT_INTER_FRAME_US 150
+#endif
 
 //--------------------------------------------------------------------+
 // USART Instance Mapping
@@ -187,8 +198,37 @@ static void split_transport_disable_tx(void) {
 #endif
 }
 
+//--------------------------------------------------------------------+
+// Inter-Frame Gap
+//--------------------------------------------------------------------+
+
+static bool split_transport_sent_once = false;
+static uint32_t split_transport_last_tx_cycle = 0;
+
+static void split_transport_wait_inter_frame(void) {
+  // The first send has no preceding frame to leave a gap after.
+  if (!split_transport_sent_once)
+    return;
+
+  const uint32_t system_clock = board_clock_frequency();
+  const uint32_t gap_cycles =
+      (system_clock / 1000000) * (uint32_t)SPLIT_TRANSPORT_INTER_FRAME_US;
+  const uint32_t now = board_cycle_count();
+  const uint32_t elapsed = now - split_transport_last_tx_cycle;
+
+  // Unsigned subtraction wraps safely: the gap is only 150 us, far inside the
+  // 32-bit cycle counter's wrap period.
+  if (elapsed < gap_cycles) {
+    const uint32_t start = now;
+    while ((board_cycle_count() - start) < (gap_cycles - elapsed))
+      ;
+  }
+}
+
 bool split_transport_send(const uint8_t *data, uint8_t len) {
   usart_type *usart = split_usart_instance();
+
+  split_transport_wait_inter_frame();
 
   split_transport_enable_tx();
 
@@ -197,6 +237,8 @@ bool split_transport_send(const uint8_t *data, uint8_t len) {
     while (usart_flag_get(usart, USART_TDBE_FLAG) == RESET) {
       if (timer_elapsed(tx_start) >= SPLIT_TRANSPORT_SEND_TIMEOUT_MS) {
         split_transport_disable_tx();
+        split_transport_last_tx_cycle = board_cycle_count();
+        split_transport_sent_once = true;
         return false;
       }
     }
@@ -208,6 +250,8 @@ bool split_transport_send(const uint8_t *data, uint8_t len) {
   while (usart_flag_get(usart, USART_TDC_FLAG) == RESET) {
     if (timer_elapsed(tc_start) >= SPLIT_TRANSPORT_SEND_TIMEOUT_MS) {
       split_transport_disable_tx();
+      split_transport_last_tx_cycle = board_cycle_count();
+      split_transport_sent_once = true;
       return false;
     }
   }
@@ -215,6 +259,9 @@ bool split_transport_send(const uint8_t *data, uint8_t len) {
   // Release the shared line immediately after the final stop bit. Holding the
   // push-pull driver active here collides with the other half's response.
   split_transport_disable_tx();
+
+  split_transport_last_tx_cycle = board_cycle_count();
+  split_transport_sent_once = true;
   return true;
 }
 
