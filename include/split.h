@@ -171,7 +171,11 @@ bool split_send_control_command(uint8_t command);
  * @brief Queue a pointing-config frame for the slave half
  *
  * Master only. The frame is delivered as a poll follow-up, same as control
- * commands. Used when the pointing sensor is mounted on the slave half.
+ * commands. Always relayed while pending (a sensor-less slave applies it as
+ * a harmless runtime-only update) so a slave-side sensor — single or dual
+ * builds alike — receives the global fields. The slot clears only when the
+ * slave reports the apply (SPLIT_FRAME_POINTING_CONFIG_ACK); until then the
+ * frame is retransmitted on later polls.
  *
  * @param enabled Sensor enable flag
  * @param auto_mouse_layer_enabled Auto mouse layer enable flag
@@ -184,6 +188,21 @@ bool split_send_pointing_config(uint8_t enabled,
                                 uint8_t auto_mouse_layer_enabled,
                                 uint16_t cpi,
                                 uint8_t auto_mouse_layer);
+
+/**
+ * @brief Queue a per-side orientation frame for the slave half
+ *
+ * Queues into the pending slot for `side` (each side has its own slot, so
+ * back-to-back SETs for both sides never overwrite each other). The master
+ * task relays one side frame per poll and the slot clears only when the
+ * slave reports the applied side (SPLIT_FRAME_POINTING_SIDE_ACK); until
+ * then the frame is retransmitted on later polls.
+ *
+ * @return true if the frame was queued, false if not the master
+ */
+bool split_send_pointing_side_config(uint8_t side, uint16_t rotation_deg,
+                                     uint8_t invert_x, uint8_t invert_y,
+                                     uint8_t swap_axes);
 
 /**
  * @brief Force one master split transaction

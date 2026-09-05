@@ -23,8 +23,17 @@
 // Pointing Device Configuration
 //--------------------------------------------------------------------+
 
+#if defined(POINTING_DEVICE_SIDE_LEFT) && defined(POINTING_DEVICE_SIDE_RIGHT)
+// Dual-sensor build (keyboard.json pointing_device.side "both"): both halves
+// carry a sensor on the same wiring, so every half senses and relays motion.
+#define POINTING_DEVICE_DUAL_SENSOR 1
+#endif
+
 #if defined(SPLIT_KEYBOARD)
-#if defined(SPLIT_HANDEDNESS_USB)
+#if defined(POINTING_DEVICE_DUAL_SENSOR)
+#define POINTING_DEVICE_ON_THIS_HALF (true)
+#define POINTING_DEVICE_ON_REMOTE_HALF (true)
+#elif defined(SPLIT_HANDEDNESS_USB)
 // When handedness is determined by the USB connection, the master half is
 // treated as the left half. Pointing device side then refers to the logical
 // half: "left" means the USB-connected (master) half, "right" means the other
@@ -34,12 +43,14 @@
 #else
 #define POINTING_DEVICE_ON_THIS_HALF (!split_is_master())
 #endif
+#define POINTING_DEVICE_ON_REMOTE_HALF (!POINTING_DEVICE_ON_THIS_HALF)
 #else
 #if defined(POINTING_DEVICE_SIDE_LEFT)
 #define POINTING_DEVICE_ON_THIS_HALF (split_is_left())
 #else
 #define POINTING_DEVICE_ON_THIS_HALF (!split_is_left())
 #endif
+#define POINTING_DEVICE_ON_REMOTE_HALF (!POINTING_DEVICE_ON_THIS_HALF)
 #endif
 #else
 #define POINTING_DEVICE_ON_THIS_HALF (true)
@@ -95,10 +106,10 @@ void pointing_device_add_remote_delta(int16_t dx, int16_t dy);
 /**
  * @brief Apply pointing configuration locally (sensor + AML)
  *
- * Used on boot, by the slave after a split relay, and as part of set_config.
- * Does not persist to EEPROM and does not relay to the other half.
+ * Validates the configuration and falls back to the build-time defaults when
+ * invalid. Never relays to the other half.
  *
- * @param cfg Pointing configuration
+ * @param cfg Configuration to apply
  *
  * @return None
  */
@@ -107,9 +118,10 @@ void pointing_device_apply_local(const pointing_config_t *cfg);
 /**
  * @brief Apply pointing configuration and relay to the sensor half if needed
  *
- * Persistence is the caller's responsibility (EECONFIG_WRITE).
+ * Persists happen in the command handler. Relays runtime fields to the slave
+ * when the sensor lives on the opposite half.
  *
- * @param cfg Pointing configuration
+ * @param cfg Configuration to apply
  *
  * @return None
  */
@@ -124,11 +136,67 @@ const pointing_config_t *pointing_device_get_config(void);
 /**
  * @brief Reload the pointing configuration from EEPROM and reapply it
  *
- * Called when this half is promoted to master, where the persisted
- * configuration becomes authoritative.
+ * Used when this half is promoted to master: pointing_device_init() may have
+ * run before USB enumeration settled the role and left the build-time
+ * defaults in place.
  *
  * @return None
  */
 void pointing_device_reload_config(void);
+
+/**
+ * @brief Check whether a side slot has a sensor on this build
+ *
+ * Dual-sensor builds report both sides; single-sensor builds report only the
+ * side the sensor is wired to, so GET_SIDE_CONFIG can return supported=0 for
+ * the sensor-less side. On non-split builds this follows the
+ * POINTING_DEVICE_SIDE_* build flag.
+ *
+ * @param side POINTING_SIDE_LEFT or POINTING_SIDE_RIGHT
+ *
+ * @return true when the side carries a sensor
+ */
+bool pointing_device_side_supported(uint8_t side);
+
+/**
+ * @brief Get this half's side identifier (POINTING_SIDE_LEFT/RIGHT)
+ *
+ * On split keyboards this is the physical side from split_is_left(). On
+ * non-split builds it follows the POINTING_DEVICE_SIDE_* build flag.
+ *
+ * @return 1 for left, 2 for right
+ */
+uint8_t pointing_device_my_side(void);
+
+/**
+ * @brief Get the runtime side orientation for this half's sensor
+ *
+ * @return Pointer to the runtime side configuration
+ */
+const pointing_side_config_t *pointing_device_get_side_runtime(void);
+
+/**
+ * @brief Apply a side orientation locally without persisting or relaying
+ *
+ * @param cfg Side configuration to apply (must target this half's side)
+ *
+ * @return None
+ */
+void pointing_device_apply_side_local(const pointing_side_config_t *cfg);
+
+/**
+ * @brief Apply a side orientation and relay to the slave half
+ *
+ * Persistence happens in the caller (command handler / split RX). The master
+ * relays every side update (own side included) so both halves' EEPROM side
+ * tables converge; the pending slot for that side clears when the slave ACKs.
+ *
+ * @param side POINTING_SIDE_LEFT or POINTING_SIDE_RIGHT
+ * @param cfg Side configuration to apply
+ *
+ * @return None
+ */
+void pointing_device_set_side_config(uint8_t side,
+                                     const pointing_side_config_t *cfg);
 #endif
 

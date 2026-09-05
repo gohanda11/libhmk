@@ -110,8 +110,36 @@ static bool v1_9_profile_config_func(uint8_t profile, uint8_t *dst,
 // number changed (to keep it off the scroll layer), so a value written by an
 // older build may equal POINTING_DEVICE_SCROLL_LAYER and turn every cursor
 // move into wheel ticks. The layout is otherwise unchanged.
+#define MIGRATION_V1_9_POINTING_CONFIG_SIZE 5
 #define MIGRATION_V1_9_GLOBAL_CONFIG_SIZE MIGRATION_V1_8_GLOBAL_CONFIG_SIZE
 #define MIGRATION_V1_9_PROFILE_CONFIG_SIZE MIGRATION_V1_8_PROFILE_CONFIG_SIZE
+
+static bool v1_10_global_config_func(uint8_t *dst, const uint8_t *src);
+static bool v1_10_profile_config_func(uint8_t profile, uint8_t *dst,
+                                      const uint8_t *src);
+
+// v1.10: expand pointing_config to the 16-byte v2 layout (axis orientation,
+// scroll, snap and rotation are runtime-configurable now). The v2 size is
+// fixed at 16 bytes; do not use sizeof(pointing_config_t) here because v3
+// shrank it to 10 bytes.
+#define MIGRATION_V1_10_POINTING_CONFIG_SIZE 16
+#define MIGRATION_V1_10_GLOBAL_CONFIG_SIZE                                   \
+  (MIGRATION_V1_9_GLOBAL_CONFIG_SIZE - MIGRATION_V1_9_POINTING_CONFIG_SIZE + \
+   MIGRATION_V1_10_POINTING_CONFIG_SIZE)
+#define MIGRATION_V1_10_PROFILE_CONFIG_SIZE MIGRATION_V1_9_PROFILE_CONFIG_SIZE
+
+static bool v1_11_global_config_func(uint8_t *dst, const uint8_t *src);
+static bool v1_11_profile_config_func(uint8_t profile, uint8_t *dst,
+                                      const uint8_t *src);
+
+// v1.11: split pointing_config v2 (16B) into v3 global (10B, no orientation)
+// plus two per-side orientation slots (5B each). Net +4 bytes.
+#define MIGRATION_V1_11_POINTING_CONFIG_SIZE 10
+#define MIGRATION_V1_11_SIDE_CONFIG_SIZE 5
+#define MIGRATION_V1_11_GLOBAL_CONFIG_SIZE                                   \
+  (MIGRATION_V1_10_GLOBAL_CONFIG_SIZE - MIGRATION_V1_10_POINTING_CONFIG_SIZE + \
+   MIGRATION_V1_11_POINTING_CONFIG_SIZE + 2 * MIGRATION_V1_11_SIDE_CONFIG_SIZE)
+#define MIGRATION_V1_11_PROFILE_CONFIG_SIZE MIGRATION_V1_10_PROFILE_CONFIG_SIZE
 
 
 // Migration metadata for each configuration version. The first entry is
@@ -185,15 +213,33 @@ static const migration_t migrations[] = {
         .global_config_func = v1_9_global_config_func,
         .profile_config_func = v1_9_profile_config_func,
     },
+    {
+        .version = 0x010a,
+        .global_config_size = MIGRATION_V1_10_GLOBAL_CONFIG_SIZE,
+        .profile_config_size = MIGRATION_V1_10_PROFILE_CONFIG_SIZE,
+        .global_config_func = v1_10_global_config_func,
+        .profile_config_func = v1_10_profile_config_func,
+    },
+    {
+        .version = 0x010b,
+        .global_config_size = MIGRATION_V1_11_GLOBAL_CONFIG_SIZE,
+        .profile_config_size = MIGRATION_V1_11_PROFILE_CONFIG_SIZE,
+        .global_config_func = v1_11_global_config_func,
+        .profile_config_func = v1_11_profile_config_func,
+    },
 };
-
 // An assertion to remind us to bump the persistent configuration version, and
 // implement a migration function if there is a change to the configuration
 // type. Update the assertion when a new version is added.
-_Static_assert(MIGRATION_V1_9_GLOBAL_CONFIG_SIZE +
-                       NUM_PROFILES * MIGRATION_V1_9_PROFILE_CONFIG_SIZE ==
+_Static_assert(MIGRATION_V1_11_GLOBAL_CONFIG_SIZE +
+                       NUM_PROFILES * MIGRATION_V1_11_PROFILE_CONFIG_SIZE ==
                    offsetof(eeconfig_t, magic_end),
                "Invalid configuration size");
+_Static_assert(sizeof(pointing_config_t) == MIGRATION_V1_11_POINTING_CONFIG_SIZE,
+               "v3 pointing_config_t must be 10 bytes");
+_Static_assert(sizeof(pointing_side_config_t) ==
+                   MIGRATION_V1_11_SIDE_CONFIG_SIZE,
+               "pointing_side_config_t must be 5 bytes");
 
 // An assertion to remind us if there is a breaking change to `MACRO_NODE_NONE`.
 // Update the assertion when a new version is added.
@@ -653,6 +699,154 @@ bool v1_9_profile_config_func(uint8_t profile, uint8_t *dst,
 
   // Profiles are unchanged in v1.9; keep the user keymaps/macros as-is.
   migration_memcpy(&dst, &src, MIGRATION_V1_8_PROFILE_CONFIG_SIZE);
+
+  return true;
+}
+
+//--------------------------------------------------------------------+
+// v1.9 -> v1.10 Migration (pointing_config v2)
+//--------------------------------------------------------------------+
+
+bool v1_10_global_config_func(uint8_t *dst, const uint8_t *src) {
+  if (((const eeconfig_t *)src)->version != 0x0109)
+    // Expected version v1.9
+    return false;
+
+  // Copy the whole v1.9 global config except the trailing pointing_config
+  // (pointing_config is the last global field).
+  migration_memcpy(&dst, &src, MIGRATION_V1_9_GLOBAL_CONFIG_SIZE -
+                                   MIGRATION_V1_9_POINTING_CONFIG_SIZE);
+
+  // Read the old 5-byte pointing_config:
+  //   [0] enabled, [1] auto_mouse_layer_enabled, [2-3] cpi LE,
+  //   [4] auto_mouse_layer
+  const uint8_t old_enabled = src[0];
+  const uint8_t old_auto_mouse_layer_enabled = src[1];
+  const uint16_t old_cpi = (uint16_t)(src[2] | ((uint16_t)src[3] << 8));
+  const uint8_t old_auto_mouse_layer = src[4];
+
+  // Write the v2 layout, seeding the new orientation/scroll/snap/rotation
+  // fields from the build-time defaults. make.py derives the orientation
+  // defaults from the same keyboard.json values that used to produce the
+  // compile-time PMW3610 axis flags, so the effective transform is unchanged.
+  migration_assign_uint8_t(&dst, old_enabled);                 // enabled
+  migration_assign_uint8_t(&dst, old_auto_mouse_layer_enabled); // aml_enabled
+  migration_assign_uint8_t(&dst, DEFAULT_POINTING_INVERT_X ? 1 : 0);
+  migration_assign_uint8_t(&dst, DEFAULT_POINTING_INVERT_Y ? 1 : 0);
+  migration_assign_uint8_t(&dst, DEFAULT_POINTING_SWAP_AXES ? 1 : 0);
+  migration_assign_uint8_t(&dst, false); // invert_scroll
+  migration_assign_uint8_t(&dst, DEFAULT_POINTING_SCROLL_LAYER);
+  migration_assign_uint8_t(&dst, DEFAULT_POINTING_SCROLL_DIVISOR);
+  migration_assign_uint8_t(&dst, POINTING_SNAP_AXIS_OFF);
+  migration_assign_uint8_t(&dst, DEFAULT_POINTING_SNAP_THRESHOLD);
+  migration_assign_uint8_t(&dst, old_auto_mouse_layer);
+  migration_assign_uint8_t(&dst, 0xFF); // reserved
+  migration_assign_uint16_t(&dst, DEFAULT_POINTING_ROTATION_DEG);
+  migration_assign_uint16_t(&dst, old_cpi);
+
+  return true;
+}
+
+bool v1_10_profile_config_func(uint8_t profile, uint8_t *dst,
+                               const uint8_t *src) {
+  (void)profile;
+
+  // Profiles are unchanged in v1.10; keep the user keymaps/macros as-is.
+  migration_memcpy(&dst, &src, MIGRATION_V1_9_PROFILE_CONFIG_SIZE);
+
+  return true;
+}
+
+//--------------------------------------------------------------------+
+// v1.10 -> v1.11 Migration (pointing_config v3 + per-side orientation)
+//--------------------------------------------------------------------+
+
+bool v1_11_global_config_func(uint8_t *dst, const uint8_t *src) {
+  if (((const eeconfig_t *)src)->version != 0x010a)
+    // Expected version v1.10
+    return false;
+
+  // Copy everything before the trailing v2 pointing_config (16B).
+  migration_memcpy(&dst, &src, MIGRATION_V1_10_GLOBAL_CONFIG_SIZE -
+                                   MIGRATION_V1_10_POINTING_CONFIG_SIZE);
+
+  // Old v2 layout (16B):
+  //   [0]enabled [1]aml_enabled [2]invert_x [3]invert_y [4]swap
+  //   [5]invert_scroll [6]scroll_layer [7]scroll_divisor [8]snap_axis
+  //   [9]snap_threshold [10]auto_mouse_layer [11]reserved
+  //   [12-13]rotation LE [14-15]cpi LE
+  const uint8_t old_enabled = src[0];
+  const uint8_t old_aml_enabled = src[1];
+  uint8_t old_invert_x = src[2];
+  uint8_t old_invert_y = src[3];
+  uint8_t old_swap = src[4];
+  const uint8_t old_invert_scroll = src[5];
+  const uint8_t old_scroll_layer = src[6];
+  const uint8_t old_scroll_divisor = src[7];
+  const uint8_t old_snap_axis = src[8];
+  const uint8_t old_snap_threshold = src[9];
+  const uint8_t old_auto_mouse_layer = src[10];
+  const uint16_t old_rotation =
+      (uint16_t)(src[12] | ((uint16_t)src[13] << 8));
+  const uint16_t old_cpi = (uint16_t)(src[14] | ((uint16_t)src[15] << 8));
+
+  // Sanitize orientation before carrying it into the sensor-side slot so a
+  // corrupted v2 value cannot poison the v3 side config.
+  if (old_invert_x > 1)
+    old_invert_x = DEFAULT_POINTING_INVERT_X ? 1 : 0;
+  if (old_invert_y > 1)
+    old_invert_y = DEFAULT_POINTING_INVERT_Y ? 1 : 0;
+  if (old_swap > 1)
+    old_swap = DEFAULT_POINTING_SWAP_AXES ? 1 : 0;
+  uint16_t carried_rotation = old_rotation;
+  if (carried_rotation >= 360)
+    carried_rotation = DEFAULT_POINTING_ROTATION_DEG;
+
+  // Write the v3 global layout (10B, no orientation, no reserved).
+  migration_assign_uint8_t(&dst, old_enabled);
+  migration_assign_uint8_t(&dst, old_aml_enabled);
+  migration_assign_uint8_t(&dst, old_invert_scroll);
+  migration_assign_uint8_t(&dst, old_scroll_layer);
+  migration_assign_uint8_t(&dst, old_scroll_divisor);
+  migration_assign_uint8_t(&dst, old_snap_axis);
+  migration_assign_uint8_t(&dst, old_snap_threshold);
+  migration_assign_uint8_t(&dst, old_auto_mouse_layer);
+  migration_assign_uint16_t(&dst, old_cpi);
+
+  // Sensor-side slot inherits the old orientation; the other slot keeps the
+  // build-time defaults. Both halves compile with the same
+  // POINTING_DEVICE_SIDE_* define (split60he: right), so both EEPROM copies
+  // converge to the same side table.
+#if defined(POINTING_DEVICE_SIDE_LEFT)
+  const uint8_t sensor_idx = 0;
+#elif defined(POINTING_DEVICE_SIDE_RIGHT)
+  const uint8_t sensor_idx = 1;
+#else
+  const uint8_t sensor_idx = 0;
+#endif
+  for (uint8_t idx = 0; idx < 2; idx++) {
+    if (idx == sensor_idx) {
+      migration_assign_uint16_t(&dst, carried_rotation);
+      migration_assign_uint8_t(&dst, old_invert_x);
+      migration_assign_uint8_t(&dst, old_invert_y);
+      migration_assign_uint8_t(&dst, old_swap);
+    } else {
+      migration_assign_uint16_t(&dst, DEFAULT_POINTING_ROTATION_DEG);
+      migration_assign_uint8_t(&dst, DEFAULT_POINTING_INVERT_X ? 1 : 0);
+      migration_assign_uint8_t(&dst, DEFAULT_POINTING_INVERT_Y ? 1 : 0);
+      migration_assign_uint8_t(&dst, DEFAULT_POINTING_SWAP_AXES ? 1 : 0);
+    }
+  }
+
+  return true;
+}
+
+bool v1_11_profile_config_func(uint8_t profile, uint8_t *dst,
+                               const uint8_t *src) {
+  (void)profile;
+
+  // Profiles are unchanged in v1.11; keep the user keymaps/macros as-is.
+  migration_memcpy(&dst, &src, MIGRATION_V1_10_PROFILE_CONFIG_SIZE);
 
   return true;
 }

@@ -183,6 +183,26 @@ class KeyboardActuation(StrictBaseModel):
     actuation_point: int = Field(ge=0, le=65535)
 
 
+# Default Tap-Hold (modtap) advanced key entry. Keycodes are C identifiers
+# from `include/keycodes.h` (e.g. "KC_A", "KC_LEFT_SHIFT"), resolved at
+# firmware compile time.
+class KeyboardAdvancedKeyTapHold(StrictBaseModel):
+    # Advanced key type
+    type: Literal["tap_hold"]
+    # Layer of the key to bind
+    layer: NonNegativeInt
+    # Zero-based global key index
+    key: NonNegativeInt
+    # Keycode registered when the key is tapped
+    tap_keycode: str
+    # Keycode registered while the key is held
+    hold_keycode: str
+    # Tapping term in milliseconds
+    tapping_term: int = Field(default=200, ge=0, le=65535)
+    # Immediately resolve to the hold action when another key is pressed
+    hold_on_other_key_press: bool = False
+
+
 # Pointing Device Pin Configuration
 class KeyboardPointingDevicePins(StrictBaseModel):
     # Chip-select GPIO pin name
@@ -203,8 +223,12 @@ class KeyboardPointingDevice(StrictBaseModel):
     enabled: bool = False
     # Sensor type. Currently only "pmw3610" is supported.
     sensor: str = Field(default="pmw3610", pattern=r"^(pmw3610)$")
-    # Which half the sensor is connected to (only used for split keyboards)
-    side: Literal["left", "right"] = "right"
+    # Which half the sensor is connected to (only used for split keyboards).
+    # "both" mounts a sensor on each half with the same wiring/pins, enabling
+    # the dual-sensor firmware build (POINTING_DEVICE_SIDE_LEFT +
+    # POINTING_DEVICE_SIDE_RIGHT). Per-side orientation tuning stays a runtime
+    # setting through SET_SIDE_CONFIG.
+    side: Literal["left", "right", "both"] = "right"
     # GPIO pin assignments
     pins: KeyboardPointingDevicePins
     # CPI (counts per inch). PMW3610 supports 200-3200 in steps of 200.
@@ -243,6 +267,8 @@ class Keyboard(StrictBaseModel):
     keymaps: list[list[list[str]]] | None = None
     actuation: KeyboardActuation | None = None
     pointing_device: KeyboardPointingDevice | None = None
+    # Default advanced keys (e.g. modtap entries) applied to every profile
+    advanced_keys: list[KeyboardAdvancedKeyTapHold] | None = None
 
     @model_validator(mode="after")
     def check_analog_config(self) -> "Keyboard":
@@ -273,4 +299,26 @@ class Keyboard(StrictBaseModel):
                     raise ValueError(
                         f"analog.raw or analog.mux is required for the {name} half"
                     )
+        return self
+
+    @model_validator(mode="after")
+    def check_advanced_keys(self) -> "Keyboard":
+        if self.advanced_keys is None:
+            return self
+        if len(self.advanced_keys) > self.keyboard.num_advanced_keys:
+            raise ValueError(
+                f"advanced_keys has {len(self.advanced_keys)} entries, but "
+                f"keyboard.num_advanced_keys is {self.keyboard.num_advanced_keys}"
+            )
+        for ak in self.advanced_keys:
+            if ak.layer >= self.keyboard.num_layers:
+                raise ValueError(
+                    f"advanced_keys layer ({ak.layer}) must be less than "
+                    f"keyboard.num_layers ({self.keyboard.num_layers})"
+                )
+            if ak.key >= self.keyboard.num_keys:
+                raise ValueError(
+                    f"advanced_keys key ({ak.key}) must be less than "
+                    f"keyboard.num_keys ({self.keyboard.num_keys})"
+                )
         return self

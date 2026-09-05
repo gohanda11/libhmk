@@ -341,7 +341,27 @@ static void command_process(void) {
     success = eeconfig_reset();
     layout_load_advanced_keys();
 #if defined(POINTING_DEVICE_ENABLED)
-    pointing_device_set_config(&eeconfig->pointing_config);
+    pointing_device_reload_config();
+#if defined(SPLIT_KEYBOARD)
+    // The reset only rewrote this half's flash; push the default runtime to
+    // the slave so its EEPROM table converges to the master's. The global
+    // fields are always pushed, and both side slots are pushed so a
+    // sensor-less slave still repairs its copies.
+    if (split_is_master()) {
+      const pointing_config_t *rcfg = pointing_device_get_config();
+      split_send_pointing_config(rcfg->enabled,
+                                 rcfg->auto_mouse_layer_enabled, rcfg->cpi,
+                                 rcfg->auto_mouse_layer);
+      for (uint8_t s = 0; s < POINTING_NUM_SIDES; s++) {
+        const pointing_side_config_t *slot = &eeconfig->pointing_side[s];
+        if (pointing_side_config_is_valid(slot)) {
+          split_send_pointing_side_config(
+              (uint8_t)(s + 1u), slot->rotation_deg, slot->invert_x ? 1 : 0,
+              slot->invert_y ? 1 : 0, slot->swap_axes ? 1 : 0);
+        }
+      }
+    }
+#endif
 #endif
     break;
   }
@@ -510,42 +530,63 @@ static void command_process(void) {
 #if defined(POINTING_DEVICE_ENABLED)
     const pointing_config_t *cfg = pointing_device_get_config();
     out->pointing_config.supported = 1;
-#if defined(POINTING_DEVICE_SIDE_LEFT)
+#if defined(POINTING_DEVICE_DUAL_SENSOR)
+    // Both halves carry a sensor; no single sensor side to report.
+    out->pointing_config.side = 0;
+#elif defined(POINTING_DEVICE_SIDE_LEFT)
     out->pointing_config.side = 1;
 #elif defined(POINTING_DEVICE_SIDE_RIGHT)
     out->pointing_config.side = 2;
 #else
     out->pointing_config.side = 0;
 #endif
+#else
+    const pointing_config_t *cfg = &eeconfig->pointing_config;
+    out->pointing_config.supported = 0;
+    out->pointing_config.side = 0;
+#endif
+    // The v3 payload is byte-identical to pointing_config_t (10B).
     out->pointing_config.enabled = cfg->enabled ? 1 : 0;
     out->pointing_config.auto_mouse_layer_enabled =
         cfg->auto_mouse_layer_enabled ? 1 : 0;
-    out->pointing_config.cpi = cfg->cpi;
+    out->pointing_config.invert_scroll = cfg->invert_scroll ? 1 : 0;
+    out->pointing_config.scroll_layer = cfg->scroll_layer;
+    out->pointing_config.scroll_divisor = cfg->scroll_divisor;
+    out->pointing_config.snap_axis = cfg->snap_axis;
+    out->pointing_config.snap_threshold = cfg->snap_threshold;
     out->pointing_config.auto_mouse_layer = cfg->auto_mouse_layer;
-#else
-    out->pointing_config.supported = 0;
-    out->pointing_config.side = 0;
-    out->pointing_config.enabled = eeconfig->pointing_config.enabled ? 1 : 0;
-    out->pointing_config.auto_mouse_layer_enabled =
-        eeconfig->pointing_config.auto_mouse_layer_enabled ? 1 : 0;
-    out->pointing_config.cpi = eeconfig->pointing_config.cpi;
-    out->pointing_config.auto_mouse_layer = eeconfig->pointing_config.auto_mouse_layer;
-#endif
+    out->pointing_config.cpi = cfg->cpi;
     break;
   }
   case COMMAND_SET_POINTING_CONFIG: {
     const command_in_pointing_config_t *p = &in->pointing_config;
 #if defined(POINTING_DEVICE_ENABLED)
+    COMMAND_VERIFY(p->enabled <= 1);
+    COMMAND_VERIFY(p->auto_mouse_layer_enabled <= 1);
+    COMMAND_VERIFY(p->invert_scroll <= 1);
     COMMAND_VERIFY(p->cpi >= PMW3610_MIN_CPI && p->cpi <= PMW3610_MAX_CPI);
     // PMW3610 hardware / make.py both require 200 CPI steps.
     COMMAND_VERIFY((p->cpi % 200) == 0);
     COMMAND_VERIFY(p->auto_mouse_layer < NUM_LAYERS);
+    COMMAND_VERIFY(p->scroll_layer == POINTING_SCROLL_LAYER_OFF ||
+                   p->scroll_layer < NUM_LAYERS);
+    COMMAND_VERIFY(p->scroll_divisor != 0);
+    COMMAND_VERIFY(p->snap_axis <= POINTING_SNAP_AXIS_Y);
+    COMMAND_VERIFY(p->snap_threshold <= 100);
+    // AML on the scroll layer would swallow every cursor move as wheel ticks.
+    COMMAND_VERIFY(p->scroll_layer == POINTING_SCROLL_LAYER_OFF ||
+                   p->scroll_layer != p->auto_mouse_layer);
 
     pointing_config_t cfg = {
         .enabled = p->enabled != 0,
         .auto_mouse_layer_enabled = p->auto_mouse_layer_enabled != 0,
-        .cpi = p->cpi,
+        .invert_scroll = p->invert_scroll != 0,
+        .scroll_layer = p->scroll_layer,
+        .scroll_divisor = p->scroll_divisor,
+        .snap_axis = p->snap_axis,
+        .snap_threshold = p->snap_threshold,
         .auto_mouse_layer = p->auto_mouse_layer,
+        .cpi = p->cpi,
     };
     success = EECONFIG_WRITE(pointing_config, &cfg);
     if (success)
@@ -553,6 +594,73 @@ static void command_process(void) {
 #else
     // Unsupported keyboards accept SET as a no-op success.
     (void)p;
+    success = true;
+#endif
+    break;
+  }
+  case COMMAND_GET_SIDE_CONFIG: {
+#if defined(POINTING_DEVICE_ENABLED)
+    const uint8_t side = in->get_side_config.side;
+    COMMAND_VERIFY(side == POINTING_SIDE_LEFT ||
+                   side == POINTING_SIDE_RIGHT);
+    const uint8_t idx = (uint8_t)(side - 1);
+    const pointing_side_config_t *scfg = &eeconfig->pointing_side[idx];
+    // Repair-on-read so a corrupted slot never reaches the host.
+    pointing_side_config_t def =
+        (pointing_side_config_t)DEFAULT_POINTING_SIDE_CONFIG;
+    if (!pointing_side_config_is_valid(scfg))
+      scfg = &def;
+    // Only the side that actually carries a sensor is reported as supported;
+    // a single-sensor build answers 0 for the sensor-less side so the host
+    // hides that panel instead of editing a dead slot.
+    out->side_config.supported = pointing_device_side_supported(side) ? 1 : 0;
+    out->side_config.rotation_deg = scfg->rotation_deg;
+    out->side_config.invert_x = scfg->invert_x ? 1 : 0;
+    out->side_config.invert_y = scfg->invert_y ? 1 : 0;
+    out->side_config.swap_axes = scfg->swap_axes ? 1 : 0;
+#else
+    const uint8_t side = in->get_side_config.side;
+    COMMAND_VERIFY(side == POINTING_SIDE_LEFT ||
+                   side == POINTING_SIDE_RIGHT);
+    out->side_config.supported = 0;
+    out->side_config.rotation_deg = 0;
+    out->side_config.invert_x = 0;
+    out->side_config.invert_y = 0;
+    out->side_config.swap_axes = 0;
+#endif
+    break;
+  }
+  case COMMAND_SET_SIDE_CONFIG: {
+    const command_in_side_config_t *p = &in->side_config;
+#if defined(POINTING_DEVICE_ENABLED)
+    COMMAND_VERIFY(p->side == POINTING_SIDE_LEFT ||
+                   p->side == POINTING_SIDE_RIGHT);
+    COMMAND_VERIFY(p->rotation_deg < 360);
+    COMMAND_VERIFY(p->invert_x <= 1);
+    COMMAND_VERIFY(p->invert_y <= 1);
+    COMMAND_VERIFY(p->swap_axes <= 1);
+    pointing_side_config_t side_cfg = {
+        .rotation_deg = p->rotation_deg,
+        .invert_x = p->invert_x != 0,
+        .invert_y = p->invert_y != 0,
+        .swap_axes = p->swap_axes != 0,
+    };
+    const uint8_t idx = (uint8_t)(p->side - 1);
+    // Persist the targeted slot in this half's local EEPROM, then relay via
+    // pointing_device_set_side_config() (own side included) so the slave
+    // persists its copy as well; both halves' side tables converge.
+    success = wear_leveling_write(offsetof(eeconfig_t, pointing_side) +
+                                      idx * sizeof(pointing_side_config_t),
+                                  &side_cfg, sizeof(side_cfg));
+    if (success)
+      pointing_device_set_side_config(p->side, &side_cfg);
+#else
+    COMMAND_VERIFY(p->side == POINTING_SIDE_LEFT ||
+                   p->side == POINTING_SIDE_RIGHT);
+    COMMAND_VERIFY(p->rotation_deg < 360);
+    COMMAND_VERIFY(p->invert_x <= 1);
+    COMMAND_VERIFY(p->invert_y <= 1);
+    COMMAND_VERIFY(p->swap_axes <= 1);
     success = true;
 #endif
     break;

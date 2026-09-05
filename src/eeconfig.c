@@ -25,6 +25,8 @@ const eeconfig_t *eeconfig;
 static eeconfig_options_t default_options = DEFAULT_OPTIONS;
 static eeconfig_calibration_t default_calibration = DEFAULT_CALIBRATION;
 static pointing_config_t default_pointing_config = DEFAULT_POINTING_CONFIG;
+static pointing_side_config_t default_pointing_side_config =
+    DEFAULT_POINTING_SIDE_CONFIG;
 static const uint8_t default_keymaps[NUM_PROFILES][NUM_LAYERS][NUM_KEYS] =
     DEFAULT_KEYMAPS;
 static const macro_node_t default_macro = {
@@ -34,6 +36,7 @@ static const macro_node_t default_macro = {
     .next = MACRO_NODE_NONE,
 };
 static eeconfig_profile_t default_profile = {
+    .advanced_keys = DEFAULT_ADVANCED_KEYS,
     .gamepad_options = DEFAULT_GAMEPAD_OPTIONS,
     .tick_rate = DEFAULT_TICK_RATE,
 };
@@ -63,7 +66,8 @@ bool pointing_config_is_valid(const pointing_config_t *cfg) {
   // may be neither 0 nor 1. Inspect the storage instead of the _Bool value.
   const uint8_t *raw = (const uint8_t *)cfg;
   if (raw[offsetof(pointing_config_t, enabled)] > 1 ||
-      raw[offsetof(pointing_config_t, auto_mouse_layer_enabled)] > 1)
+      raw[offsetof(pointing_config_t, auto_mouse_layer_enabled)] > 1 ||
+      raw[offsetof(pointing_config_t, invert_scroll)] > 1)
     return false;
 
   // CPI must be supported by the PMW3610 and quantized to 200 CPI steps.
@@ -72,6 +76,33 @@ bool pointing_config_is_valid(const pointing_config_t *cfg) {
     return false;
 
   if (cfg->auto_mouse_layer >= NUM_LAYERS)
+    return false;
+
+  if (cfg->scroll_layer != POINTING_SCROLL_LAYER_OFF &&
+      cfg->scroll_layer >= NUM_LAYERS)
+    return false;
+
+  // A zero scroll divisor would divide by zero in scroll mode.
+  if (cfg->scroll_divisor == 0)
+    return false;
+
+  if (cfg->snap_axis > POINTING_SNAP_AXIS_Y || cfg->snap_threshold > 100)
+    return false;
+
+  return true;
+}
+
+bool pointing_side_config_is_valid(const pointing_side_config_t *cfg) {
+  if (cfg == NULL)
+    return false;
+
+  const uint8_t *raw = (const uint8_t *)cfg;
+  if (raw[offsetof(pointing_side_config_t, invert_x)] > 1 ||
+      raw[offsetof(pointing_side_config_t, invert_y)] > 1 ||
+      raw[offsetof(pointing_side_config_t, swap_axes)] > 1)
+    return false;
+
+  if (cfg->rotation_deg >= 360)
     return false;
 
   return true;
@@ -93,6 +124,11 @@ void eeconfig_init(void) {
   // migration already wrote the defaults, making this a no-op in that case.
   if (!pointing_config_is_valid(&eeconfig->pointing_config))
     EECONFIG_WRITE(pointing_config, &default_pointing_config);
+  for (uint8_t s = 0; s < POINTING_NUM_SIDES; s++) {
+    if (!pointing_side_config_is_valid(&eeconfig->pointing_side[s]))
+      EECONFIG_WRITE_N(pointing_side[s], &default_pointing_side_config,
+                       sizeof(pointing_side_config_t));
+  }
 }
 
 // Helper macro for writing rvalue
@@ -117,6 +153,9 @@ bool eeconfig_reset(void) {
   EECONFIG_WRITE_LOCAL(last_non_default_profile, M_MIN(1, NUM_PROFILES - 1));
   EECONFIG_WRITE_LOCAL(split_handedness, DEFAULT_SPLIT_HANDEDNESS);
   status &= EECONFIG_WRITE(pointing_config, &default_pointing_config);
+  for (uint8_t s = 0; s < POINTING_NUM_SIDES; s++)
+    status &= EECONFIG_WRITE_N(pointing_side[s], &default_pointing_side_config,
+                               sizeof(pointing_side_config_t));
   for (uint32_t i = 0; i < NUM_PROFILES; i++)
     status &= eeconfig_write_default_profile(i);
   EECONFIG_WRITE_LOCAL(magic_end, EECONFIG_MAGIC_END);

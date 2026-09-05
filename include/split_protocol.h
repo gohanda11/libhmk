@@ -26,7 +26,7 @@
 
 // Protocol version. Frames with a mismatched version are rejected so halves
 // running incompatible firmware fail fast instead of misreading payloads.
-#define SPLIT_PROTOCOL_VERSION 2
+#define SPLIT_PROTOCOL_VERSION 3
 
 // Maximum payload size for a single frame
 #define SPLIT_MAX_PAYLOAD_SIZE 128
@@ -51,6 +51,17 @@ typedef enum {
   SPLIT_FRAME_POINTING = 0x05,
   // Master -> Slave: pointing device runtime config relay
   SPLIT_FRAME_POINTING_CONFIG = 0x06,
+  SPLIT_FRAME_POINTING_SIDE_CONFIG = 0x07,
+  // Slave -> Master: side-config apply report (payload: side u8). Sent right
+  // after KEY_STATE when the slave has newly persisted a POINTING_SIDE_CONFIG
+  // follow-up; the master clears that side's pending slot only on this ACK so
+  // a lost follow-up is retransmitted on later polls.
+  SPLIT_FRAME_POINTING_SIDE_ACK = 0x08,
+  // Slave -> Master: global-config apply report (empty payload). Sent right
+  // after KEY_STATE when the slave has newly applied a POINTING_CONFIG
+  // follow-up; the master clears its pending global slot only on this ACK so
+  // a lost follow-up is retransmitted on later polls.
+  SPLIT_FRAME_POINTING_CONFIG_ACK = 0x09,
 } split_frame_type_t;
 
 //--------------------------------------------------------------------+
@@ -66,6 +77,8 @@ typedef enum {
   SPLIT_POLL_FLAG_FOLLOWUP_CONTROL = 0x04,
   // Master will send a pointing-config frame after the slave response
   SPLIT_POLL_FLAG_FOLLOWUP_POINTING_CONFIG = 0x08,
+  // Master will send a pointing side-config frame after the slave response
+  SPLIT_POLL_FLAG_FOLLOWUP_POINTING_SIDE_CONFIG = 0x10,
 } split_poll_flags_t;
 
 //--------------------------------------------------------------------+
@@ -124,6 +137,22 @@ typedef struct __attribute__((packed)) {
   uint16_t cpi;
   uint8_t auto_mouse_layer;
 } split_pointing_config_payload_t;
+
+typedef struct __attribute__((packed)) {
+  uint8_t side;
+  uint16_t rotation_deg;
+  uint8_t invert_x;
+  uint8_t invert_y;
+  uint8_t swap_axes;
+} split_pointing_side_config_payload_t;
+
+typedef struct __attribute__((packed)) {
+  // POINTING_SIDE_LEFT / POINTING_SIDE_RIGHT: the side slot just persisted.
+  uint8_t side;
+} split_side_ack_payload_t;
+
+_Static_assert(sizeof(split_side_ack_payload_t) == 1,
+               "Side ACK payload must be 1 byte");
 
 //--------------------------------------------------------------------+
 // Split Protocol API

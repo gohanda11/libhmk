@@ -249,6 +249,30 @@ build_flags.define("NUM_MACRO_NODES", kb.num_macro_nodes)
 default_keymaps = utils.resolve_default_keymaps(kb_json)
 build_flags.define("DEFAULT_KEYMAPS", utils.to_c_array(default_keymaps))
 
+# Default advanced keys (e.g. modtap entries from keyboard.json), applied to
+# every profile on reset. Unspecified slots default to AK_TYPE_NONE.
+def advanced_key_to_c(ak):
+    if ak.type == "tap_hold":
+        return (
+            "{ .layer = %d, .key = %d, .type = AK_TYPE_TAP_HOLD, "
+            ".tap_hold = { .tap_keycode = %s, .hold_keycode = %s, "
+            ".tapping_term = %d, .hold_on_other_key_press = %s } }"
+            % (
+                ak.layer,
+                ak.key,
+                ak.tap_keycode,
+                ak.hold_keycode,
+                ak.tapping_term,
+                "true" if ak.hold_on_other_key_press else "false",
+            )
+        )
+    raise ValueError(f"Unsupported advanced key type: {ak.type}")
+
+
+if kb_json.advanced_keys:
+    entries = ", ".join(advanced_key_to_c(ak) for ak in kb_json.advanced_keys)
+    build_flags.define("DEFAULT_ADVANCED_KEYS", "{ " + entries + " }")
+
 # Actuation Configuration
 if kb_json.actuation is not None:
     actuation = kb_json.actuation
@@ -347,7 +371,11 @@ if kb_json.pointing_device is not None and kb_json.pointing_device.enabled:
     build_flags.define("POINTING_DEVICE_ENABLED")
     build_flags.define("POINTING_DEVICE_SENSOR_PMW3610")
 
-    if pd.side == "left":
+    if pd.side == "both":
+        # Dual-sensor build: both halves carry a sensor on the same wiring.
+        build_flags.define("POINTING_DEVICE_SIDE_LEFT")
+        build_flags.define("POINTING_DEVICE_SIDE_RIGHT")
+    elif pd.side == "left":
         build_flags.define("POINTING_DEVICE_SIDE_LEFT")
     else:
         build_flags.define("POINTING_DEVICE_SIDE_RIGHT")
@@ -394,12 +422,12 @@ if kb_json.pointing_device is not None and kb_json.pointing_device.enabled:
     final_inv_x = angle_inv_x ^ pd.invert_x
     final_inv_y = angle_inv_y ^ pd.invert_y
 
-    if final_swap:
-        build_flags.define("PMW3610_SWAP_XY")
-    if final_inv_x:
-        build_flags.define("PMW3610_INVERT_X")
-    if final_inv_y:
-        build_flags.define("PMW3610_INVERT_Y")
+    # Axis orientation is applied at runtime in pointing_device.c from the
+    # persisted pointing configuration; seed its defaults so the out-of-box
+    # behavior matches the keyboard.json values.
+    build_flags.define("DEFAULT_POINTING_SWAP_AXES", "true" if final_swap else "false")
+    build_flags.define("DEFAULT_POINTING_INVERT_X", "true" if final_inv_x else "false")
+    build_flags.define("DEFAULT_POINTING_INVERT_Y", "true" if final_inv_y else "false")
 
     if pd.auto_mouse_layer >= 0:
         build_flags.define("POINTING_DEVICE_AUTO_MOUSE_LAYER", pd.auto_mouse_layer)

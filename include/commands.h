@@ -46,6 +46,8 @@ typedef enum {
   COMMAND_ANALOG_INFO_U16 = 18,
   COMMAND_GET_POINTING_CONFIG = 19,
   COMMAND_SET_POINTING_CONFIG = 20,
+  COMMAND_GET_SIDE_CONFIG = 21,
+  COMMAND_SET_SIDE_CONFIG = 22,
 
   COMMAND_GET_KEYMAP = 128,
   COMMAND_SET_KEYMAP,
@@ -104,12 +106,44 @@ typedef struct __attribute__((packed)) {
   uint8_t handedness;
 } command_in_split_handedness_t;
 
+// SET_POINTING_CONFIG payload: the 10-byte pointing_config v3 wire format,
+// byte-identical to pointing_config_t (no orientation, no reserved).
 typedef struct __attribute__((packed)) {
   uint8_t enabled;
   uint8_t auto_mouse_layer_enabled;
-  uint16_t cpi;
+  uint8_t invert_scroll;
+  // POINTING_SCROLL_LAYER_OFF (0xFF) disables scroll mode
+  uint8_t scroll_layer;
+  // Raw sensor counts per wheel tick (1-255)
+  uint8_t scroll_divisor;
+  // POINTING_SNAP_AXIS_* (0=off, 1=X, 2=Y)
+  uint8_t snap_axis;
+  // Snap threshold in percent of the dominant axis (0-100)
+  uint8_t snap_threshold;
   uint8_t auto_mouse_layer;
+  uint16_t cpi;
 } command_in_pointing_config_t;
+
+_Static_assert(sizeof(command_in_pointing_config_t) ==
+                   sizeof(pointing_config_t),
+               "SET_POINTING_CONFIG payload must match pointing_config_t");
+
+// GET_SIDE_CONFIG input: side selector (POINTING_SIDE_LEFT/RIGHT).
+typedef struct __attribute__((packed)) {
+  uint8_t side;
+} command_in_get_side_config_t;
+
+// SET_SIDE_CONFIG payload: side + 5B side orientation (rotation LE first).
+typedef struct __attribute__((packed)) {
+  uint8_t side;
+  uint16_t rotation_deg;
+  uint8_t invert_x;
+  uint8_t invert_y;
+  uint8_t swap_axes;
+} command_in_side_config_t;
+
+_Static_assert(sizeof(command_in_side_config_t) == 6,
+               "SET_SIDE_CONFIG payload must be 6 bytes");
 
 typedef struct __attribute__((packed)) {
   uint8_t profile;
@@ -190,6 +224,8 @@ typedef struct __attribute__((packed)) {
     command_in_metadata_t metadata;
     command_in_split_handedness_t split_handedness;
     command_in_pointing_config_t pointing_config;
+    command_in_get_side_config_t get_side_config;
+    command_in_side_config_t side_config;
 
     command_in_keymap_t keymap;
     command_in_actuation_map_t actuation_map;
@@ -231,14 +267,38 @@ typedef struct __attribute__((packed)) {
   uint8_t init_ok;
 } command_out_pointing_device_info_t;
 
+// GET_POINTING_CONFIG response: the `supported`/`side` header is kept for
+// backwards compatibility, followed by the 10-byte pointing_config v3
+// payload (same layout as command_in_pointing_config_t).
 typedef struct __attribute__((packed)) {
   uint8_t supported;
   uint8_t side;
   uint8_t enabled;
   uint8_t auto_mouse_layer_enabled;
-  uint16_t cpi;
+  uint8_t invert_scroll;
+  uint8_t scroll_layer;
+  uint8_t scroll_divisor;
+  uint8_t snap_axis;
+  uint8_t snap_threshold;
   uint8_t auto_mouse_layer;
+  uint16_t cpi;
 } command_out_pointing_config_t;
+
+_Static_assert(sizeof(command_out_pointing_config_t) ==
+                   2 + sizeof(pointing_config_t),
+               "GET_POINTING_CONFIG response must be header + v3 payload");
+
+// GET_SIDE_CONFIG response: supported + 5B side orientation.
+typedef struct __attribute__((packed)) {
+  uint8_t supported;
+  uint16_t rotation_deg;
+  uint8_t invert_x;
+  uint8_t invert_y;
+  uint8_t swap_axes;
+} command_out_side_config_t;
+
+_Static_assert(sizeof(command_out_side_config_t) == 6,
+               "GET_SIDE_CONFIG response must be 6 bytes");
 
 typedef struct __attribute__((packed)) {
   // Number of valid bytes in `data`
@@ -260,6 +320,8 @@ typedef struct __attribute__((packed)) {
     command_out_pointing_device_info_t pointing_device_info;
     // For `COMMAND_GET_POINTING_CONFIG`
     command_out_pointing_config_t pointing_config;
+    // For `COMMAND_GET_SIDE_CONFIG`
+    command_out_side_config_t side_config;
     // For `COMMAND_GET_CALIBRATION`
     eeconfig_calibration_t calibration;
     // For `COMMAND_GET_PROFILE`

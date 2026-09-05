@@ -63,6 +63,14 @@ def keyboard_metadata_def():
         "numMacroNodes": kb_json.keyboard.num_macro_nodes,
         "layout": kb_json.layout.model_dump(exclude_none=True),
         "defaultKeymaps": utils.resolve_default_keymaps(kb_json),
+        "defaultAdvancedKeys": (
+            [ak.model_dump(exclude_none=True) for ak in kb_json.advanced_keys]
+            if kb_json.advanced_keys
+            else []
+        ),
+        # Sensor halves for the web configurator ("left"/"right"/both/empty).
+        # Unknown to older configurators, which strip it on parse.
+        "pointing": pointing_metadata(),
     }
 
     uncompressed = json.dumps(metadata).encode("utf-8")
@@ -71,6 +79,15 @@ def keyboard_metadata_def():
     print(f"Compressed metadata size: {len(compressed)} bytes")
 
     return utils.to_slice_def("KEYBOARD_METADATA", compressed)
+
+
+def pointing_metadata():
+    pd = kb_json.pointing_device
+    if pd is None or not pd.enabled:
+        return {"enabled": False, "sides": []}
+    if pd.side == "both":
+        return {"enabled": True, "sides": ["left", "right"]}
+    return {"enabled": True, "sides": [pd.side]}
 
 
 with open(os.path.join("include", "metadata.h"), "w") as f:

@@ -28,7 +28,6 @@ on:
       - "src/**"
       - ".github/workflows/build.yml"
       - ".github/workflows/ci_define_matrix.py"
-    tags: ["v*"]
 
 permissions:
   contents: write
@@ -93,14 +92,23 @@ jobs:
             .pio/build/${{ matrix.keyboard }}/firmware.bin
             .pio/build/${{ matrix.keyboard }}/firmware.elf
 
-  publish-firmware:
-    name: Publish Firmware to firmware Branch
-    if: github.ref_name == 'main'
+  publish-stable:
+    name: Publish Stable Firmware
+    if: github.ref == 'refs/heads/main'
     needs: build
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    concurrency:
+      group: firmware-branch-push
+      cancel-in-progress: false
     steps:
+      - name: Checkout source
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
       - name: Download Firmware Artifacts
         uses: actions/download-artifact@v8
         with:
@@ -111,6 +119,26 @@ jobs:
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Derive version and changelog base
+        id: version
+        run: |
+          VER_HEX=$(grep -E '^#define FIRMWARE_VERSION' include/common.h | awk '{print $3}')
+          VER_DEC=$((VER_HEX))
+          MAJOR=$(( (VER_DEC >> 8) & 0xFF ))
+          MINOR=$(( VER_DEC & 0xFF ))
+          TAG="v${MAJOR}.${MINOR}"
+          echo "version=${VER_DEC}" >> "$GITHUB_OUTPUT"
+          echo "version_text=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          git fetch origin 'refs/tags/*:refs/tags/*' || true
+          PREV_TAG=$(git tag --list 'v[0-9]*.[0-9]*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+$' | grep -v "^${TAG}$" | head -n 1 || true)
+          echo "prev_tag=${PREV_TAG}" >> "$GITHUB_OUTPUT"
+          if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+            echo "tag_exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag_exists=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Checkout or Create firmware Branch
         run: |
@@ -125,71 +153,291 @@ jobs:
             git rm -rf . || true
           fi
 
-      - name: Organize Firmware Files
+      - name: Publish stable and archive binaries
+        env:
+          HMK_TAG: ${{ steps.version.outputs.tag }}
+          HMK_TAG_EXISTS: ${{ steps.version.outputs.tag_exists }}
         run: |
           cd firmware-repo
+          shopt -s nullglob
           for dir in ../artifacts/firmware-*/; do
             keyboard=$(basename "$dir" | sed 's/^firmware-//')
-            mkdir -p "$keyboard"
-            cp "$dir"firmware.bin "$keyboard/firmware.bin"
+            mkdir -p "stable/${keyboard}"
+            cp "$dir"firmware.bin "stable/${keyboard}/firmware.bin"
+            if [ "${HMK_TAG_EXISTS}" != 'true' ]; then
+              mkdir -p "archive/${HMK_TAG}/${keyboard}"
+              cp "$dir"firmware.bin "archive/${HMK_TAG}/${keyboard}/firmware.bin"
+            fi
+          done
+          for dir in stable/*/; do
+            keyboard=$(basename "$dir")
+            if [ ! -d "../artifacts/firmware-${keyboard}" ]; then
+              rm -rf "stable/${keyboard}"
+            fi
           done
 
-      - name: Generate Manifest
+      - name: Generate manifest.json and versions.json
+        env:
+          HMK_REPO: ${{ github.repository }}
+          HMK_SHA: ${{ github.sha }}
+          HMK_VERSION: ${{ steps.version.outputs.version }}
+          HMK_VERSION_TEXT: ${{ steps.version.outputs.version_text }}
+          HMK_TAG: ${{ steps.version.outputs.tag }}
+          HMK_PREV_TAG: ${{ steps.version.outputs.prev_tag }}
+          HMK_TAG_EXISTS: ${{ steps.version.outputs.tag_exists }}
         run: |
           cd firmware-repo
           python3 - <<'PY'
           import json
           import os
+          import subprocess
           from datetime import datetime, timezone
+          repo = os.environ["HMK_REPO"]
+          sha = os.environ["HMK_SHA"]
+          version = int(os.environ["HMK_VERSION"])
+          version_text = os.environ["HMK_VERSION_TEXT"]
+          tag = os.environ["HMK_TAG"]
+          prev_tag = os.environ.get("HMK_PREV_TAG", "")
+          tag_exists = os.environ.get("HMK_TAG_EXISTS", "") == "true"
+          built_at = datetime.now(timezone.utc).isoformat()
+          src_root = os.environ.get("GITHUB_WORKSPACE", ".")
 
-          keyboards = []
-          for name in sorted(os.listdir('.')):
-              if os.path.isdir(name) and os.path.exists(os.path.join(name, 'firmware.bin')):
-                  size = os.path.getsize(os.path.join(name, 'firmware.bin'))
-                  keyboards.append({
-                      "keyboard": name,
-                      "url": f"https://raw.githubusercontent.com/${{ github.repository }}/firmware/{name}/firmware.bin",
-                      "size": size,
-                      "branch": "main",
-                      "commit": "${{ github.sha }}",
-                      "built_at": datetime.now(timezone.utc).isoformat()
-                  })
+          rev_range = f"{prev_tag}..HEAD" if prev_tag else "HEAD"
+          try:
+              log = subprocess.run(
+                  ["git", "-C", src_root, "log", rev_range, "--format=%s"],
+                  capture_output=True, text=True, check=True,
+              ).stdout
+          except subprocess.CalledProcessError:
+              log = ""
+          changelog = [line.strip() for line in log.splitlines() if line.strip()]
 
-          manifest = {
-              "repository": "${{ github.repository }}",
-              "branch": "main",
-              "commit": "${{ github.sha }}",
-              "built_at": datetime.now(timezone.utc).isoformat(),
-              "firmwares": keyboards
-          }
+          firmwares = []
+          for keyboard in sorted(os.listdir("stable")):
+              bindir = os.path.join("stable", keyboard)
+              binpath = os.path.join(bindir, "firmware.bin")
+              if not (os.path.isdir(bindir) and os.path.isfile(binpath)):
+                  continue
+              with open(os.path.join(src_root, "keyboards", keyboard, "keyboard.json")) as f:
+                  meta = json.load(f)
+              firmwares.append({
+                  "keyboard": keyboard,
+                  "url": f"https://raw.githubusercontent.com/{repo}/firmware/stable/{keyboard}/firmware.bin",
+                  "size": os.path.getsize(binpath),
+                  "vid": meta["usb"]["vid"],
+                  "pid": meta["usb"]["pid"],
+                  "driver": meta["hardware"]["driver"],
+                  "commit": sha,
+                  "built_at": built_at,
+              })
 
-          with open('manifest.json', 'w') as f:
-              json.dump(manifest, f, indent=2)
+          with open("manifest.json", "w") as f:
+              json.dump({
+                  "version": version,
+                  "version_text": version_text,
+                  "channel": "stable",
+                  "repository": repo,
+                  "branch": "main",
+                  "commit": sha,
+                  "built_at": built_at,
+                  "changelog": changelog,
+                  "firmwares": firmwares,
+              }, f, indent=2)
+              f.write("\n")
+
+          if not tag_exists:
+              versions = {"versions": []}
+              if os.path.isfile("versions.json"):
+                  with open("versions.json") as f:
+                      try:
+                          loaded = json.load(f)
+                      except json.JSONDecodeError:
+                          loaded = {}
+                  if isinstance(loaded.get("versions"), list):
+                      versions["versions"] = loaded["versions"]
+              entries = [e for e in versions["versions"] if e.get("tag") != tag]
+              entries.append({
+                  "version": version,
+                  "tag": tag,
+                  "commit": sha,
+                  "built_at": built_at,
+                  "changelog": changelog,
+                  "url_prefix": f"archive/{tag}",
+              })
+              entries.sort(key=lambda e: e.get("version", 0), reverse=True)
+              with open("versions.json", "w") as f:
+                  json.dump({"versions": entries}, f, indent=2)
+                  f.write("\n")
           PY
 
       - name: Commit and Push
         run: |
           cd firmware-repo
           git add -A
-          git commit -m "Update firmware from main @ ${{ github.sha }}" || true
+          git commit -m "Update stable firmware ${{ steps.version.outputs.tag }} from main @ ${{ github.sha }}" || true
           git push origin firmware
 
-  release:
-    name: Create Releast Draft
-    if: github.ref_type == 'tag'
+      - name: Prepare release assets
+        run: |
+          mkdir -p release-assets
+          for dir in artifacts/firmware-*/; do
+            keyboard=$(basename "$dir" | sed 's/^firmware-//')
+            cp "$dir"firmware.bin "release-assets/${keyboard}-firmware.bin"
+          done
+          cp firmware-repo/manifest.json release-assets/manifest.json
+
+      - name: Create GitHub Release
+        if: steps.version.outputs.tag_exists != 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: Firmware ${{ steps.version.outputs.tag }}
+          generate_release_notes: true
+          files: release-assets/*
+
+  publish-dev:
+    name: Publish Dev Firmware
+    if: github.ref == 'refs/heads/dev'
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: firmware-branch-push
+      cancel-in-progress: false
     steps:
+      - name: Checkout source
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
       - name: Download Firmware Artifacts
         uses: actions/download-artifact@v8
         with:
           pattern: firmware-*
+          path: artifacts
 
-      - name: Zip Firmware Binaries
-        run: zip -r firmware.zip firmware-*
+      - name: Setup Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: Create Release Draft
-        uses: softprops/action-gh-release@v2
-        with:
-          draft: true
-          files: firmware.zip
+      - name: Derive version and changelog base
+        id: version
+        run: |
+          VER_HEX=$(grep -E '^#define FIRMWARE_VERSION' include/common.h | awk '{print $3}')
+          VER_DEC=$((VER_HEX))
+          MAJOR=$(( (VER_DEC >> 8) & 0xFF ))
+          MINOR=$(( VER_DEC & 0xFF ))
+          TAG="v${MAJOR}.${MINOR}"
+          echo "version=${VER_DEC}" >> "$GITHUB_OUTPUT"
+          echo "version_text=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          git fetch origin 'refs/tags/*:refs/tags/*' || true
+          BASE_TAG=$(git tag --list 'v[0-9]*.[0-9]*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+$' | head -n 1 || true)
+          echo "base_tag=${BASE_TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout or Create firmware Branch
+        run: |
+          git init firmware-repo
+          cd firmware-repo
+          git remote add origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
+          git fetch origin firmware || true
+          if git rev-parse --verify origin/firmware >/dev/null 2>&1; then
+            git checkout -b firmware origin/firmware
+          else
+            git checkout --orphan firmware
+            git rm -rf . || true
+          fi
+
+      - name: Publish dev binaries
+        run: |
+          cd firmware-repo
+          shopt -s nullglob
+          for dir in ../artifacts/firmware-*/; do
+            keyboard=$(basename "$dir" | sed 's/^firmware-//')
+            mkdir -p "dev/${keyboard}"
+            cp "$dir"firmware.bin "dev/${keyboard}/firmware.bin"
+          done
+          for dir in dev/*/; do
+            keyboard=$(basename "$dir")
+            if [ ! -d "../artifacts/firmware-${keyboard}" ]; then
+              rm -rf "dev/${keyboard}"
+            fi
+          done
+
+      - name: Generate manifest-dev.json
+        env:
+          HMK_REPO: ${{ github.repository }}
+          HMK_SHA: ${{ github.sha }}
+          HMK_VERSION: ${{ steps.version.outputs.version }}
+          HMK_VERSION_TEXT: ${{ steps.version.outputs.version_text }}
+          HMK_BASE_TAG: ${{ steps.version.outputs.base_tag }}
+        run: |
+          cd firmware-repo
+          python3 - <<'PY'
+          import json
+          import os
+          import subprocess
+          from datetime import datetime, timezone
+
+          repo = os.environ["HMK_REPO"]
+          sha = os.environ["HMK_SHA"]
+          version = int(os.environ["HMK_VERSION"])
+          version_text = os.environ["HMK_VERSION_TEXT"]
+          base_tag = os.environ.get("HMK_BASE_TAG", "")
+          built_at = datetime.now(timezone.utc).isoformat()
+          src_root = os.environ.get("GITHUB_WORKSPACE", ".")
+
+          rev_range = f"{base_tag}..HEAD" if base_tag else "HEAD"
+          try:
+              log = subprocess.run(
+                  ["git", "-C", src_root, "log", rev_range, "--format=%s"],
+                  capture_output=True, text=True, check=True,
+              ).stdout
+          except subprocess.CalledProcessError:
+              log = ""
+          changelog = [line.strip() for line in log.splitlines() if line.strip()]
+
+          firmwares = []
+          for keyboard in sorted(os.listdir("dev")):
+              bindir = os.path.join("dev", keyboard)
+              binpath = os.path.join(bindir, "firmware.bin")
+              if not (os.path.isdir(bindir) and os.path.isfile(binpath)):
+                  continue
+              with open(os.path.join(src_root, "keyboards", keyboard, "keyboard.json")) as f:
+                  meta = json.load(f)
+              firmwares.append({
+                  "keyboard": keyboard,
+                  "url": f"https://raw.githubusercontent.com/{repo}/firmware/dev/{keyboard}/firmware.bin",
+                  "size": os.path.getsize(binpath),
+                  "vid": meta["usb"]["vid"],
+                  "pid": meta["usb"]["pid"],
+                  "driver": meta["hardware"]["driver"],
+                  "commit": sha,
+                  "built_at": built_at,
+              })
+
+          with open("manifest-dev.json", "w") as f:
+              json.dump({
+                  "version": version,
+                  "version_text": version_text,
+                  "channel": "dev",
+                  "repository": repo,
+                  "branch": "dev",
+                  "commit": sha,
+                  "built_at": built_at,
+                  "changelog": changelog,
+                  "firmwares": firmwares,
+              }, f, indent=2)
+              f.write("\n")
+          PY
+
+      - name: Commit and Push
+        run: |
+          cd firmware-repo
+          git add -A
+          git commit -m "Update dev firmware from dev @ ${{ github.sha }}" || true
+          git push origin firmware

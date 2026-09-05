@@ -60,14 +60,57 @@ typedef union __attribute__((packed)) {
 _Static_assert(sizeof(eeconfig_options_t) == sizeof(uint16_t),
                "Invalid eeconfig_options_t size");
 
-// Pointing device runtime configuration (device-common, not per-profile)
+// `scroll_layer` value that disables scroll mode
+#define POINTING_SCROLL_LAYER_OFF 0xFF
+
+// `snap_axis` values
+#define POINTING_SNAP_AXIS_OFF 0
+#define POINTING_SNAP_AXIS_X 1
+#define POINTING_SNAP_AXIS_Y 2
+
+// Pointing device runtime configuration v3 (device-common, not per-profile).
+// The field order matches the GET/SET_POINTING_CONFIG v3 wire payload exactly
+// (10 bytes, little-endian, packed) so the command layer can copy the struct
+// verbatim after the `supported`/`side` response header. Orientation
+// (rotation/invert/swap) lives in pointing_side_config_t instead.
 typedef struct __attribute__((packed)) {
   bool enabled;
   bool auto_mouse_layer_enabled;
-  uint16_t cpi;
+  bool invert_scroll;
+  // Layer that turns pointer motion into scroll input (0xFF = off)
+  uint8_t scroll_layer;
+  // Raw sensor counts per wheel tick (1-255, default 32)
+  uint8_t scroll_divisor;
+  // Axis snapping: POINTING_SNAP_AXIS_*
+  uint8_t snap_axis;
+  // Snap threshold in percent of the dominant axis (0-100)
+  uint8_t snap_threshold;
   uint8_t auto_mouse_layer;
+  uint16_t cpi;
 } pointing_config_t;
 
+_Static_assert(sizeof(pointing_config_t) == 10,
+               "pointing_config_t must match the 10-byte v3 wire format");
+
+// Per-side physical-axis compensation. Each half persists both slots locally;
+// index 0 is the left half, index 1 is the right half. The owning half
+// applies its slot to its own sensor output before the split link / HID.
+typedef struct __attribute__((packed)) {
+  // Sensor rotation correction in degrees (0-359)
+  uint16_t rotation_deg;
+  bool invert_x;
+  bool invert_y;
+  bool swap_axes;
+} pointing_side_config_t;
+
+_Static_assert(sizeof(pointing_side_config_t) == 5,
+               "pointing_side_config_t must be 5 bytes");
+
+// Side identifiers used by GET/SET_SIDE_CONFIG and pointing_side[] indexing
+// (side value = index + 1, matching GET_POINTING_CONFIG side coding).
+#define POINTING_SIDE_LEFT 1
+#define POINTING_SIDE_RIGHT 2
+#define POINTING_NUM_SIDES 2
 // Keyboard profile configuration
 typedef struct __attribute__((packed)) {
   uint8_t keymap[NUM_LAYERS][NUM_KEYS];
@@ -82,7 +125,7 @@ typedef struct __attribute__((packed)) {
 // Persistent configuration version. The size of the configuration must be
 // non-decreasing, so that the migration can assume that the new version is at
 // least as large as the previous version.
-#define EECONFIG_VERSION 0x0109
+#define EECONFIG_VERSION 0x010b
 
 // Keyboard configuration
 // Whenever there is a change in the configuration, `EECONFIG_VERSION` must be
@@ -108,8 +151,11 @@ typedef struct __attribute__((packed)) {
   uint8_t last_non_default_profile;
   // Split keyboard handedness: 0 = left, 1 = right
   uint8_t split_handedness;
-  // Pointing device configuration (master EEPROM only)
+  // Pointing device global configuration (master EEPROM is authoritative)
   pointing_config_t pointing_config;
+  // Per-side orientation, index 0 = left, 1 = right. Each half persists both
+  // slots locally; the owning half applies its slot to its sensor output.
+  pointing_side_config_t pointing_side[POINTING_NUM_SIDES];
   // End of global configurations
 
   // Profiles
@@ -197,14 +243,82 @@ extern const eeconfig_t *eeconfig;
 #endif
 #endif
 
+#if !defined(DEFAULT_POINTING_INVERT_X)
+// Per-side sensor orientation correction. make.py seeds these from the
+// keyboard.json pointing_device angle/swap_xy/invert_x/invert_y composition;
+// they are runtime-adjustable through SET_SIDE_CONFIG.
+#define DEFAULT_POINTING_INVERT_X false
+#endif
+
+#if !defined(DEFAULT_POINTING_INVERT_Y)
+#define DEFAULT_POINTING_INVERT_Y false
+#endif
+
+#if !defined(DEFAULT_POINTING_SWAP_AXES)
+#define DEFAULT_POINTING_SWAP_AXES false
+#endif
+
+#if !defined(DEFAULT_POINTING_SCROLL_LAYER)
+#if defined(POINTING_DEVICE_SCROLL_LAYER)
+#define DEFAULT_POINTING_SCROLL_LAYER POINTING_DEVICE_SCROLL_LAYER
+#else
+#define DEFAULT_POINTING_SCROLL_LAYER POINTING_SCROLL_LAYER_OFF
+#endif
+#endif
+
+#if !defined(DEFAULT_POINTING_SCROLL_DIVISOR)
+#if defined(POINTING_DEVICE_SCROLL_DIVISOR)
+#define DEFAULT_POINTING_SCROLL_DIVISOR POINTING_DEVICE_SCROLL_DIVISOR
+#else
+// Roughly one wheel tick per millimetre of ball travel at 800 CPI
+#define DEFAULT_POINTING_SCROLL_DIVISOR 32
+#endif
+#endif
+
+#if !defined(DEFAULT_POINTING_SNAP_THRESHOLD)
+// Snap threshold in percent of the dominant axis
+#define DEFAULT_POINTING_SNAP_THRESHOLD 50
+#endif
+
+#if !defined(DEFAULT_POINTING_ROTATION_DEG)
+#define DEFAULT_POINTING_ROTATION_DEG 0
+#endif
+
+#if !defined(DEFAULT_ADVANCED_KEYS)
+// Default advanced keys applied to every profile on reset. make.py expands
+// the keyboard.json `advanced_keys` entries; remaining slots default to
+// AK_TYPE_NONE.
+#define DEFAULT_ADVANCED_KEYS                                                \
+  {                                                                          \
+      {0},                                                                   \
+  }
+#endif
+
 #if !defined(DEFAULT_POINTING_CONFIG)
-// Default pointing configuration follows keyboard.json build-time values.
+// Default pointing global configuration follows keyboard.json build-time
+// values (v3, 10 bytes, no orientation fields).
 #define DEFAULT_POINTING_CONFIG                                                \
   {                                                                            \
       .enabled = true,                                                         \
       .auto_mouse_layer_enabled = DEFAULT_POINTING_AUTO_MOUSE_LAYER_ENABLED,   \
-      .cpi = DEFAULT_POINTING_CPI,                                             \
+      .invert_scroll = false,                                                  \
+      .scroll_layer = DEFAULT_POINTING_SCROLL_LAYER,                           \
+      .scroll_divisor = DEFAULT_POINTING_SCROLL_DIVISOR,                       \
+      .snap_axis = POINTING_SNAP_AXIS_OFF,                                     \
+      .snap_threshold = DEFAULT_POINTING_SNAP_THRESHOLD,                       \
       .auto_mouse_layer = DEFAULT_POINTING_AUTO_MOUSE_LAYER,                   \
+      .cpi = DEFAULT_POINTING_CPI,                                             \
+  }
+#endif
+
+#if !defined(DEFAULT_POINTING_SIDE_CONFIG)
+// Default per-side orientation follows the keyboard.json angle composition.
+#define DEFAULT_POINTING_SIDE_CONFIG                                           \
+  {                                                                            \
+      .rotation_deg = DEFAULT_POINTING_ROTATION_DEG,                           \
+      .invert_x = DEFAULT_POINTING_INVERT_X,                                   \
+      .invert_y = DEFAULT_POINTING_INVERT_Y,                                   \
+      .swap_axes = DEFAULT_POINTING_SWAP_AXES,                                 \
   }
 #endif
 
@@ -213,18 +327,32 @@ extern const eeconfig_t *eeconfig;
 //--------------------------------------------------------------------+
 
 /**
- * @brief Check whether a pointing configuration holds supported values
+ * @brief Check whether a pointing global configuration holds supported values
  *
- * Validates every field of a pointing configuration as read from persistent
- * storage or received over the split link: the boolean flags must be 0 or 1,
- * the CPI must be in the PMW3610-supported range (200-3200) in 200 CPI steps,
- * and the auto-mouse layer must exist.
+ * Validates every field of the v3 pointing global configuration: the boolean
+ * flags must be 0 or 1, the CPI must be in the PMW3610-supported range
+ * (200-3200) in 200 CPI steps, the scroll layer must be
+ * POINTING_SCROLL_LAYER_OFF or an existing layer, the scroll divisor must be
+ * non-zero, the snap axis must be a POINTING_SNAP_AXIS_* value with a
+ * threshold of at most 100 percent, and the auto-mouse layer must exist.
  *
  * @param cfg Configuration to validate
  *
  * @return true if the configuration is valid, false otherwise
  */
 bool pointing_config_is_valid(const pointing_config_t *cfg);
+
+/**
+ * @brief Check whether a per-side orientation configuration is valid
+ *
+ * The boolean flags must be 0 or 1 and the rotation must be below 360
+ * degrees.
+ *
+ * @param cfg Configuration to validate
+ *
+ * @return true if the configuration is valid, false otherwise
+ */
+bool pointing_side_config_is_valid(const pointing_side_config_t *cfg);
 
 /**
  * @brief Initialize the persistent configuration module

@@ -193,7 +193,7 @@ if split_enabled:
         pins.append((split.uart_rx_pin, "split UART RX pin"))
         if split.handedness == "pin":
             pins.append((split.handedness_pin, "handedness pin"))
-        if pd_enabled and pd.side == side:
+        if pd_enabled and (pd.side == side or pd.side == "both"):
             pins += collect_pointing_device_pins(pd)
         validate_unique_pins(pins, f"split {side} half")
 else:

@@ -285,20 +285,10 @@ bool pmw3610_read_motion(int16_t *dx, int16_t *dy) {
   if (y & 0x0800)
     y |= 0xF000;
 
-  // Apply axis orientation in software (previously done by the sensor's
-  // RES_STEP bits). Swap first, then invert, matching the sensor hardware
-  // composition. Deltas are at most 12-bit so negation stays in range.
-#if defined(PMW3610_SWAP_XY)
-  const int16_t tmp = x;
-  x = y;
-  y = tmp;
-#endif
-#if defined(PMW3610_INVERT_X)
-  x = -x;
-#endif
-#if defined(PMW3610_INVERT_Y)
-  y = -y;
-#endif
+  // Axis orientation (swap/invert/rotation) is applied at runtime in
+  // pointing_device.c from the persisted pointing configuration; the sensor
+  // driver reports raw counts. make.py seeds the persisted defaults from the
+  // keyboard.json angle/swap_xy/invert_x/invert_y values.
 
   *dx = x;
   *dy = y;
