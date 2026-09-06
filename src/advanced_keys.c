@@ -435,7 +435,7 @@ void advanced_key_process(const advanced_key_event_t *event) {
   }
 }
 
-void advanced_key_tick(bool has_non_tap_hold_press) {
+void advanced_key_tick(bool has_non_tap_hold_press, bool has_non_tap_hold_held) {
   for (uint32_t i = 0; i < NUM_ADVANCED_KEYS; i++) {
     const advanced_key_t *ak = &CURRENT_PROFILE.advanced_keys[i];
     advanced_key_state_t *state = &ak_states[i];
@@ -444,8 +444,11 @@ void advanced_key_tick(bool has_non_tap_hold_press) {
     case AK_TYPE_TAP_HOLD:
       if (state->tap_hold.stage == TAP_HOLD_STAGE_TAP &&
           // If hold on other key press is enabled, immediately register the
-          // hold key when another non-Tap-Hold key is pressed.
-          ((has_non_tap_hold_press & ak->tap_hold.hold_on_other_key_press) ||
+          // hold key when another non-Tap-Hold key is pressed or held. The
+          // level check covers another key held before the Tap-Hold press,
+          // removing the press-order asymmetry.
+          (((has_non_tap_hold_press || has_non_tap_hold_held) &&
+            ak->tap_hold.hold_on_other_key_press) ||
            // Otherwise, the key must be held for the tapping term.
            timer_elapsed(state->tap_hold.since) >= ak->tap_hold.tapping_term)) {
         layout_register(ak->key, ak->tap_hold.hold_keycode);

@@ -181,6 +181,11 @@ void layout_task(void) {
 
   uint8_t current_layer = layout_get_current_layer();
   bool has_non_tap_hold_press = false;
+  // Level state: true when any non-Tap-Hold key is currently held. Unlike the
+  // edge above (true only on press edges in this scan), this also covers the
+  // case where another key was already held before a Tap-Hold is pressed,
+  // removing the press-order asymmetry for hold_on_other_key_press.
+  bool has_non_tap_hold_held = false;
 
   // Bitmap to track keys whose press registration is deferred to pass 2
   bitmap_t deferred_presses[M_DIV_CEIL(NUM_KEYS, 32)] = {0};
@@ -235,6 +240,7 @@ void layout_task(void) {
         // Non-tap-hold key: defer registration to pass 2
         bitmap_set(deferred_presses, i, 1);
         has_non_tap_hold_press = true;
+        has_non_tap_hold_held = true;
       }
     } else if (!k->is_pressed & last_key_press) {
       // Key release event
@@ -260,6 +266,12 @@ void layout_task(void) {
       const uint8_t ak_index = active_advanced_keys[i];
 
       if (ak_index) {
+        if (CURRENT_PROFILE.advanced_keys[ak_index - 1].type !=
+            AK_TYPE_TAP_HOLD) {
+          // Another advanced key type held counts as a non-Tap-Hold hold,
+          // mirroring the press-edge classification above.
+          has_non_tap_hold_held = true;
+        }
         ak_event = (advanced_key_event_t){
             .type = AK_EVENT_TYPE_HOLD,
             .key = i,
@@ -267,6 +279,10 @@ void layout_task(void) {
             .ak_index = ak_index - 1,
         };
         advanced_key_process(&ak_event);
+      } else {
+        // Plain key held (including a deferred press from an earlier scan
+        // that is still down).
+        has_non_tap_hold_held = true;
       }
     }
 
@@ -277,8 +293,9 @@ void layout_task(void) {
   // Tick advanced keys between passes. This promotes tap-hold keys with
   // hold_on_other_key_press to HOLD (potentially activating MO layers)
   // before deferred key presses resolve their keycodes.
-  if (has_non_tap_hold_press || timer_elapsed(last_ak_tick) > 0) {
-    advanced_key_tick(has_non_tap_hold_press);
+  if (has_non_tap_hold_press || has_non_tap_hold_held ||
+      timer_elapsed(last_ak_tick) > 0) {
+    advanced_key_tick(has_non_tap_hold_press, has_non_tap_hold_held);
     last_ak_tick = timer_read();
   }
 

@@ -179,8 +179,11 @@ void advanced_key_process(const advanced_key_event_t *event);
  * This function is called periodically to update the time-based advanced keys
  * (e.g., Tap-Hold and Toggle keys).
  *
- * @param has_non_tap_hold_press Whether there is a non-Tap-Hold key press
+ * @param has_non_tap_hold_press Whether there is a non-Tap-Hold key press edge
+ * in this scan
+ * @param has_non_tap_hold_held Whether any non-Tap-Hold key is currently held,
+ * including keys pressed before this scan (level state)
  *
  * @return None
  */
-void advanced_key_tick(bool has_non_tap_hold_press);
+void advanced_key_tick(bool has_non_tap_hold_press, bool has_non_tap_hold_held);
