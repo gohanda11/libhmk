@@ -64,11 +64,15 @@ layout_get_current_layer(void) {
 
 __attribute__((always_inline)) static inline void
 layout_layer_on(uint8_t layer) {
+  if (layer >= NUM_LAYERS)
+    return;
   layer_mask |= (1 << layer);
 }
 
 __attribute__((always_inline)) static inline void
 layout_layer_off(uint8_t layer) {
+  if (layer >= NUM_LAYERS)
+    return;
   layer_mask &= ~(1 << layer);
 }
 
@@ -374,9 +378,13 @@ void layout_register(uint8_t key, uint8_t keycode) {
     should_send_reports = true;
     break;
 
-  case MOMENTARY_LAYER_RANGE:
-    layout_layer_on(MO_GET_LAYER(keycode));
+  case MOMENTARY_LAYER_RANGE: {
+    uint8_t layer = MO_GET_LAYER(keycode);
+    if (layer >= NUM_LAYERS)
+      break;
+    layout_layer_on(layer);
     break;
+  }
 
   case PROFILE_RANGE:
     layout_set_profile(PF_GET_PROFILE(keycode));
@@ -424,9 +432,13 @@ void layout_unregister(uint8_t key, uint8_t keycode) {
     should_send_reports = true;
     break;
 
-  case MOMENTARY_LAYER_RANGE:
-    layout_layer_off(MO_GET_LAYER(keycode));
+  case MOMENTARY_LAYER_RANGE: {
+    uint8_t layer = MO_GET_LAYER(keycode);
+    if (layer >= NUM_LAYERS)
+      break;
+    layout_layer_off(layer);
     break;
+  }
 
   default:
     break;

@@ -30,6 +30,12 @@ static uint16_t system_report;
 static uint16_t consumer_report;
 static hid_mouse_report_t mouse_report;
 
+static bool hid_itf_ready(uint8_t itf) {
+  if (!tud_mounted())
+    return false;
+  return tud_hid_n_ready(itf);
+}
+
 #if !defined(HID_DISABLED)
 /**
  * @brief Send the keyboard report
@@ -43,6 +49,10 @@ static void hid_send_keyboard_report(void) {
 
   if (memcmp(&prev_kb_report, &kb_report, sizeof(prev_kb_report)) == 0)
     // Don't send the report if it hasn't changed
+    return;
+
+  if (!hid_itf_ready(USB_ITF_KEYBOARD))
+    // Host not connected or endpoint busy; retry on the next call
     return;
 
   prev_kb_report = kb_report;
@@ -61,6 +71,9 @@ static void hid_send_hid_report(uint8_t starting_report_id) {
   static uint16_t prev_system_report = 0;
   static uint16_t prev_consumer_report = 0;
   static hid_mouse_report_t prev_mouse_report = {0};
+
+  if (!hid_itf_ready(USB_ITF_HID))
+    return;
 
   for (uint8_t report_id = starting_report_id; report_id < REPORT_ID_COUNT;
        report_id++) {
@@ -252,8 +265,8 @@ void hid_send_mouse_report(void) {
   if (tud_suspended())
     tud_remote_wakeup();
 
-  while (!tud_hid_n_ready(USB_ITF_HID))
-    tud_task();
+  if (!hid_itf_ready(USB_ITF_HID))
+    return;
 
   hid_send_hid_report(REPORT_ID_MOUSE);
 #endif
@@ -271,18 +284,12 @@ void hid_send_reports(void) {
     // Wake up the host if it's suspended
     tud_remote_wakeup();
 
-  while (!tud_hid_n_ready(USB_ITF_KEYBOARD))
-    // Wait for the keyboard interface to be ready
-    tud_task();
+  if (hid_itf_ready(USB_ITF_KEYBOARD))
+    hid_send_keyboard_report();
 
-  hid_send_keyboard_report();
-
-  while (!tud_hid_n_ready(USB_ITF_HID))
-    // Wait for the HID interface to be ready
-    tud_task();
-
-  // Start from the first report ID
-  hid_send_hid_report(REPORT_ID_SYSTEM_CONTROL);
+  if (hid_itf_ready(USB_ITF_HID))
+    // Start from the first report ID
+    hid_send_hid_report(REPORT_ID_SYSTEM_CONTROL);
 #endif
 }
 

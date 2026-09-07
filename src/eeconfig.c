@@ -118,6 +118,19 @@ void eeconfig_init(void) {
       (!eeconfig_is_latest_version() && !migration_try_migrate()))
     eeconfig_reset();
 
+  // Repair corrupted profile indices so CURRENT_PROFILE never reads out of
+  // bounds. A fresh reset or migration already wrote valid values, making
+  // this a no-op in that case. Values already in range are left untouched to
+  // avoid wearing the EEPROM.
+  if (eeconfig->current_profile >= NUM_PROFILES) {
+    uint8_t profile = 0;
+    EECONFIG_WRITE(current_profile, &profile);
+  }
+  if (eeconfig->last_non_default_profile >= NUM_PROFILES) {
+    uint8_t profile = M_MIN(1, NUM_PROFILES - 1);
+    EECONFIG_WRITE(last_non_default_profile, &profile);
+  }
+
   // Repair a corrupted pointing configuration so that every consumer observes
   // valid values. layout_init() reads it before pointing_device_init() runs,
   // so validation at the point of use alone is not enough. A fresh reset or
