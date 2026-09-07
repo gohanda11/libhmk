@@ -4,81 +4,82 @@
   "channel": "dev",
   "repository": "gohanda11/libhmk",
   "branch": "dev",
-  "commit": "9e2f2d6225835f0bcc9c8c5e1614652e00d707d8",
-  "built_at": "2026-09-06T22:31:02.725148+00:00",
+  "commit": "e1b0e84c1ace2e86783cf5ca86d2c6d57a3f656f",
+  "built_at": "2026-09-07T13:54:20.765619+00:00",
   "changelog": [
+    "fix: prevent boot hang from corrupted profile index and HID busy-waits",
     "fix: promote tap-hold on held keys (level-based) not only press edges"
   ],
   "firmwares": [
     {
       "keyboard": "chai45he",
       "url": "https://raw.githubusercontent.com/gohanda11/libhmk/firmware/dev/chai45he/firmware.bin",
-      "size": 37928,
+      "size": 38000,
       "vid": "0xAB50",
       "pid": "0xAB45",
       "driver": "at32f405xx",
-      "commit": "9e2f2d6225835f0bcc9c8c5e1614652e00d707d8",
-      "built_at": "2026-09-06T22:31:02.725148+00:00"
+      "commit": "e1b0e84c1ace2e86783cf5ca86d2c6d57a3f656f",
+      "built_at": "2026-09-07T13:54:20.765619+00:00"
     },
     {
       "keyboard": "he16",
       "url": "https://raw.githubusercontent.com/gohanda11/libhmk/firmware/dev/he16/firmware.bin",
-      "size": 36560,
+      "size": 36632,
       "vid": "0xAB50",
       "pid": "0xAB16",
       "driver": "at32f405xx",
-      "commit": "9e2f2d6225835f0bcc9c8c5e1614652e00d707d8",
-      "built_at": "2026-09-06T22:31:02.725148+00:00"
+      "commit": "e1b0e84c1ace2e86783cf5ca86d2c6d57a3f656f",
+      "built_at": "2026-09-07T13:54:20.765619+00:00"
     },
     {
       "keyboard": "he60",
       "url": "https://raw.githubusercontent.com/gohanda11/libhmk/firmware/dev/he60/firmware.bin",
-      "size": 42944,
+      "size": 43016,
       "vid": "0xAB50",
       "pid": "0xAB60",
       "driver": "stm32f446xx",
-      "commit": "9e2f2d6225835f0bcc9c8c5e1614652e00d707d8",
-      "built_at": "2026-09-06T22:31:02.725148+00:00"
+      "commit": "e1b0e84c1ace2e86783cf5ca86d2c6d57a3f656f",
+      "built_at": "2026-09-07T13:54:20.765619+00:00"
     },
     {
       "keyboard": "he60-flexcut",
       "url": "https://raw.githubusercontent.com/gohanda11/libhmk/firmware/dev/he60-flexcut/firmware.bin",
-      "size": 39312,
+      "size": 39384,
       "vid": "0xAB50",
       "pid": "0xAB6F",
       "driver": "at32f405xx",
-      "commit": "9e2f2d6225835f0bcc9c8c5e1614652e00d707d8",
-      "built_at": "2026-09-06T22:31:02.725148+00:00"
+      "commit": "e1b0e84c1ace2e86783cf5ca86d2c6d57a3f656f",
+      "built_at": "2026-09-07T13:54:20.765619+00:00"
     },
     {
       "keyboard": "he60-v2",
       "url": "https://raw.githubusercontent.com/gohanda11/libhmk/firmware/dev/he60-v2/firmware.bin",
-      "size": 38980,
+      "size": 39052,
       "vid": "0xAB50",
       "pid": "0xAB60",
       "driver": "at32f405xx",
-      "commit": "9e2f2d6225835f0bcc9c8c5e1614652e00d707d8",
-      "built_at": "2026-09-06T22:31:02.725148+00:00"
+      "commit": "e1b0e84c1ace2e86783cf5ca86d2c6d57a3f656f",
+      "built_at": "2026-09-07T13:54:20.765619+00:00"
     },
     {
       "keyboard": "m256-whe",
       "url": "https://raw.githubusercontent.com/gohanda11/libhmk/firmware/dev/m256-whe/firmware.bin",
-      "size": 38836,
+      "size": 38908,
       "vid": "0xAB50",
       "pid": "0xAB65",
       "driver": "at32f405xx",
-      "commit": "9e2f2d6225835f0bcc9c8c5e1614652e00d707d8",
-      "built_at": "2026-09-06T22:31:02.725148+00:00"
+      "commit": "e1b0e84c1ace2e86783cf5ca86d2c6d57a3f656f",
+      "built_at": "2026-09-07T13:54:20.765619+00:00"
     },
     {
       "keyboard": "split60he",
       "url": "https://raw.githubusercontent.com/gohanda11/libhmk/firmware/dev/split60he/firmware.bin",
-      "size": 50448,
+      "size": 50516,
       "vid": "0xAB50",
       "pid": "0xAB61",
       "driver": "at32f405xx",
-      "commit": "9e2f2d6225835f0bcc9c8c5e1614652e00d707d8",
-      "built_at": "2026-09-06T22:31:02.725148+00:00"
+      "commit": "e1b0e84c1ace2e86783cf5ca86d2c6d57a3f656f",
+      "built_at": "2026-09-07T13:54:20.765619+00:00"
     }
   ]
 }
