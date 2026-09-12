@@ -29,13 +29,24 @@
 // default (DEFAULT_POINTING_SCROLL_LAYER); the layer is runtime-configurable
 // through SET_POINTING_CONFIG.
 
-// Minimum interval between PMW3610 init attempts. A failed attempt blocks for
+// Base interval between PMW3610 init attempts. A failed attempt blocks for
 // roughly 260 ms, so retrying on every scan loop would stall key scanning and
-// the split link; the cooldown bounds the retry rate to about once per second
-// until the sensor comes up (e.g. after the power rail settles on a
-// tether-powered slave half).
+// the split link. Consecutive failures back off exponentially from this base
+// (1s -> 2s -> 4s ...) up to POINTING_DEVICE_INIT_RETRY_MAX_MS, so a
+// sensor-less half stops stalling the steady-state task at 1 Hz while a
+// present sensor still retries quickly after the power rail settles (e.g. on a
+// tether-powered slave half). A successful init resets the backoff.
 #ifndef POINTING_DEVICE_INIT_RETRY_MS
 #define POINTING_DEVICE_INIT_RETRY_MS 1000
+#endif
+// Upper bound for the exponential init-retry backoff.
+#ifndef POINTING_DEVICE_INIT_RETRY_MAX_MS
+#define POINTING_DEVICE_INIT_RETRY_MAX_MS 30000
+#endif
+// Number of consecutive failures after which the backoff saturates at the max
+// (with the defaults: 1s, 2s, 4s, 8s, 16s, then 30s capped from 32s).
+#ifndef POINTING_DEVICE_INIT_RETRY_BACKOFF_SHIFT_MAX
+#define POINTING_DEVICE_INIT_RETRY_BACKOFF_SHIFT_MAX 5
 #endif
 
 // Q15 sine table for 0-90 degrees in 1-degree steps, used for the runtime
@@ -67,6 +78,9 @@ static int16_t remote_dx;
 static int16_t remote_dy;
 static bool pmw3610_initialized;
 static uint32_t last_init_attempt;
+// Consecutive PMW3610 init failures; selects the exponential backoff step.
+// Reset on success and in pointing_device_init().
+static uint8_t init_fail_count;
 static pointing_config_t runtime_config;
 static bool runtime_config_valid;
 // Per-side orientation runtime for this half's sensor. Each half loads its own
@@ -574,11 +588,32 @@ void pointing_device_set_dual_config(const pointing_dual_config_t *cfg) {
 }
 #endif
 
+// Current init-retry interval with exponential backoff: base << fails,
+// capped at the max. The doubling loop avoids shift overflow when the base
+// is overridden to a large value.
+static uint32_t pointing_device_init_retry_interval_ms(void) {
+  uint32_t interval = POINTING_DEVICE_INIT_RETRY_MS;
+  if (interval >= POINTING_DEVICE_INIT_RETRY_MAX_MS)
+    return POINTING_DEVICE_INIT_RETRY_MAX_MS;
+  uint8_t shift = init_fail_count < POINTING_DEVICE_INIT_RETRY_BACKOFF_SHIFT_MAX
+                      ? init_fail_count
+                      : POINTING_DEVICE_INIT_RETRY_BACKOFF_SHIFT_MAX;
+  for (uint8_t i = 0; i < shift; i++) {
+    if (interval > POINTING_DEVICE_INIT_RETRY_MAX_MS / 2u)
+      return POINTING_DEVICE_INIT_RETRY_MAX_MS;
+    interval *= 2u;
+    if (interval >= POINTING_DEVICE_INIT_RETRY_MAX_MS)
+      return POINTING_DEVICE_INIT_RETRY_MAX_MS;
+  }
+  return interval;
+}
+
 void pointing_device_init(void) {
   pointing_device_clear_deltas();
   pmw3610_initialized = false;
+  init_fail_count = 0;
   // The subtraction wraps on purpose: the first task call may retry right
-  // away instead of waiting out the full cooldown.
+  // away instead of waiting out the base cooldown.
   last_init_attempt = timer_read() - POINTING_DEVICE_INIT_RETRY_MS;
 #if defined(SPLIT_KEYBOARD)
   if (split_is_master()) {
@@ -686,11 +721,17 @@ void pointing_device_reload_config(void) {
 void pointing_device_task(void) {
   if (POINTING_DEVICE_ON_THIS_HALF) {
     if (!pmw3610_initialized &&
-        timer_elapsed(last_init_attempt) >= POINTING_DEVICE_INIT_RETRY_MS) {
+        timer_elapsed(last_init_attempt) >=
+            pointing_device_init_retry_interval_ms()) {
       last_init_attempt = timer_read();
       pmw3610_initialized = pmw3610_init();
-      if (pmw3610_initialized)
+      if (pmw3610_initialized) {
+        init_fail_count = 0;
         pointing_device_apply_sensor_config();
+      } else if (init_fail_count <
+                 POINTING_DEVICE_INIT_RETRY_BACKOFF_SHIFT_MAX) {
+        init_fail_count++;
+      }
     }
 
     if (!pmw3610_initialized)

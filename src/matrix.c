@@ -97,8 +97,25 @@ static void matrix_distance_agc_decay(void) {
   distance_agc_decay_timer = timer_read();
 
   for (uint32_t i = 0; i < NUM_KEYS; i++) {
-    if (key_matrix[i].is_pressed)
+    if (key_matrix[i].is_pressed) {
+      // Pressed keys normally keep their peak so an intentional hold never
+      // loses its scaling, but a stale low peak would otherwise over-amplify
+      // the resting noise floor for as long as the press latches. While
+      // scaling is engaged, raw < peak / 2 is equivalent to scaled <
+      // TRAVEL_UNITS / 2, so a pressed key sitting far below full travel
+      // eases its peak down one step toward rest. A mid-travel hold sits near
+      // its peak and is skipped; the 2 s period keeps the erosion glacial
+      // either way. The release path (RT extremum/key_dir) is untouched, and
+      // the MIN_PEAK bypass keeps the scaling divisor non-zero.
+      const uint16_t peak = distance_peak[i];
+      if (peak < MATRIX_DISTANCE_AGC_MIN_PEAK ||
+          peak >= (uint16_t)TRAVEL_UNITS)
+        continue;
+      if ((uint32_t)key_matrix[i].distance * 2u < (uint32_t)TRAVEL_UNITS &&
+          peak > 0)
+        distance_peak[i]--;
       continue;
+    }
     if (distance_peak[i] > 0)
       distance_peak[i]--;
   }

@@ -63,6 +63,16 @@
 #define SPLIT_MAX_CONNECTION_ERRORS 8
 #endif
 
+#if !defined(SPLIT_REMOTE_KEY_EXPIRE_MS)
+// Per-key expiry for remote KEY_STATE: a remote key whose chunk has not been
+// refreshed within this window is treated as stale and released. This is a
+// different layer from the link-level connection_errors disconnect (which
+// clears all remote keys after consecutive failures): it covers partial loss
+// where polls still succeed but a key's chunk stopped arriving, leaving a
+// phantom is_pressed that would otherwise latch hold_on_other forever.
+#define SPLIT_REMOTE_KEY_EXPIRE_MS 400
+#endif
+
 #if !defined(SPLIT_ANALOG_SYNC_INTERVAL_MS)
 // Interval between full analog state synchronizations
 #define SPLIT_ANALOG_SYNC_INTERVAL_MS 500
@@ -119,6 +129,10 @@ static uint32_t last_analog_sync;
 static uint32_t last_poll_time;
 
 static bool analog_state_valid;
+// Last timer_read() stamp per global key recording when its remote KEY_STATE
+// chunk was applied. Only the current remote range is consulted; local keys
+// are never touched by the expiry pass.
+static uint32_t remote_key_update_ms[NUM_KEYS];
 
 static uint8_t pending_control_command;
 #if defined(POINTING_DEVICE_ENABLED)
@@ -391,6 +405,7 @@ split_apply_key_state_payload(const split_key_state_payload_t *payload,
     return;
   const uint8_t count = (uint8_t)M_MIN(
       (uint32_t)key_count, (uint32_t)(num_remote_keys - payload->offset));
+  const uint32_t now = timer_read();
   for (uint32_t i = 0; i < count; i++) {
     const uint8_t key = (uint8_t)((uint32_t)remote_key_offset +
                                   (uint32_t)payload->offset + i);
@@ -398,6 +413,7 @@ split_apply_key_state_payload(const split_key_state_payload_t *payload,
     // local actuation profile may be stale. Evaluate the received distance
     // against the master's authoritative profile.
     matrix_update_press_state(key, payload->distance[i]);
+    remote_key_update_ms[key] = now;
   }
 }
 
@@ -528,12 +544,37 @@ static bool split_send_frame(split_frame_type_t type, const uint8_t *payload,
 //--------------------------------------------------------------------+
 
 static void split_clear_remote_keys(void) {
+  const uint32_t now = timer_read();
   for (uint32_t i = 0; i < num_remote_keys; i++) {
     const uint8_t key = remote_key_offset + i;
     key_matrix[key].distance = 0;
     key_matrix[key].extremum = 0;
     key_matrix[key].key_dir = KEY_DIR_INACTIVE;
     key_matrix[key].is_pressed = false;
+    remote_key_update_ms[key] = now;
+  }
+}
+
+// Release remote presses whose KEY_STATE chunk stopped arriving (per-key
+// expiry, independent of the link-level connection_errors disconnect). Only
+// keys still flagged is_pressed are touched, and the clear matches
+// split_clear_remote_keys (distance/extremum/dir/pressed; analog_state_valid
+// is left alone as in the existing path). timer_elapsed() keeps the
+// comparison overflow-safe.
+static void split_expire_stale_remote_keys(void) {
+  if (!is_master)
+    return;
+  for (uint32_t i = 0; i < num_remote_keys; i++) {
+    const uint8_t key = remote_key_offset + i;
+    if (!key_matrix[key].is_pressed)
+      continue;
+    if (timer_elapsed(remote_key_update_ms[key]) <= SPLIT_REMOTE_KEY_EXPIRE_MS)
+      continue;
+    key_matrix[key].distance = 0;
+    key_matrix[key].extremum = 0;
+    key_matrix[key].key_dir = KEY_DIR_INACTIVE;
+    key_matrix[key].is_pressed = false;
+    remote_key_update_ms[key] = timer_read();
   }
 }
 
@@ -1045,6 +1086,12 @@ apply_frames:
 #endif
 
 followup:
+  // Age out remote presses whose chunk stopped arriving (slave silence or
+  // partial-frame loss). This runs on every poll cycle after the fresh apply
+  // above, so successfully updated keys are never treated as stale in the
+  // same cycle; the failure path (goto followup) skips the refresh and lets
+  // truly silent keys expire here within SPLIT_REMOTE_KEY_EXPIRE_MS.
+  split_expire_stale_remote_keys();
   // Send layer state / control commands only when advertised in the poll so
   // the slave does not sit in a receive window that can swallow the next POLL.
   // Only clear pending state when the frame is actually accepted by the UART.

@@ -117,6 +117,23 @@ static uint8_t layout_get_keycode(uint8_t current_layer, uint8_t key) {
   return CURRENT_PROFILE.keymap[default_layer][key];
 }
 
+/**
+ * @brief Whether a resolved keycode performs no action
+ *
+ * Slots resolving to KC_NO (directly, or via KC_TRANSPARENT fallthrough) and
+ * the degenerate unresolved KC_TRANSPARENT both register nothing (see the
+ * KC_NO early-return in layout_register). Such phantom/stuck presses must not
+ * count as held keys for Tap-Hold hold_on_other_key_press promotion.
+ *
+ * @param keycode Resolved keycode
+ *
+ * @return true when the keycode performs no action
+ */
+__attribute__((always_inline)) static inline bool
+layout_keycode_is_no_action(uint8_t keycode) {
+  return keycode == KC_NO || keycode == KC_TRANSPARENT;
+}
+
 // Only send reports if they changed
 static bool should_send_reports;
 // Whether the key is disabled by `SP_KEY_LOCK`
@@ -241,10 +258,16 @@ void layout_task(void) {
         };
         advanced_key_process(&ak_event);
       } else {
-        // Non-tap-hold key: defer registration to pass 2
+        // Non-tap-hold key: defer registration to pass 2. Keys resolving to
+        // no-action (KC_NO, incl. TRANSPARENT fallthrough) still defer so
+        // press/release tracking stays consistent, but they must not count
+        // as held keys for hold_on_other_key_press (phantom stuck KC_NO).
         bitmap_set(deferred_presses, i, 1);
-        has_non_tap_hold_press = true;
-        has_non_tap_hold_held = true;
+        if (ak_index || !layout_keycode_is_no_action(
+                             layout_get_keycode(current_layer, i))) {
+          has_non_tap_hold_press = true;
+          has_non_tap_hold_held = true;
+        }
       }
     } else if (!k->is_pressed & last_key_press) {
       // Key release event
@@ -285,8 +308,10 @@ void layout_task(void) {
         advanced_key_process(&ak_event);
       } else {
         // Plain key held (including a deferred press from an earlier scan
-        // that is still down).
-        has_non_tap_hold_held = true;
+        // that is still down). No-action resolutions (KC_NO) register
+        // nothing, so they must not count as held keys either.
+        if (!layout_keycode_is_no_action(keycode))
+          has_non_tap_hold_held = true;
       }
     }
 
