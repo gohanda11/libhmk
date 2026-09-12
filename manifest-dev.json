@@ -4,9 +4,10 @@
   "channel": "dev",
   "repository": "gohanda11/libhmk",
   "branch": "dev",
-  "commit": "e1b0e84c1ace2e86783cf5ca86d2c6d57a3f656f",
-  "built_at": "2026-09-07T13:54:20.765619+00:00",
+  "commit": "9c8ff7b9b64479e9bc571ed037acfc33cb52bbfd",
+  "built_at": "2026-09-12T04:01:13.489934+00:00",
   "changelog": [
+    "feat: dual-ball roles/sensitivity, split v4 dual relay, PMW3610 force-awake",
     "fix: prevent boot hang from corrupted profile index and HID busy-waits",
     "fix: promote tap-hold on held keys (level-based) not only press edges"
   ],
@@ -14,72 +15,72 @@
     {
       "keyboard": "chai45he",
       "url": "https://raw.githubusercontent.com/gohanda11/libhmk/firmware/dev/chai45he/firmware.bin",
-      "size": 38000,
+      "size": 38376,
       "vid": "0xAB50",
       "pid": "0xAB45",
       "driver": "at32f405xx",
-      "commit": "e1b0e84c1ace2e86783cf5ca86d2c6d57a3f656f",
-      "built_at": "2026-09-07T13:54:20.765619+00:00"
+      "commit": "9c8ff7b9b64479e9bc571ed037acfc33cb52bbfd",
+      "built_at": "2026-09-12T04:01:13.489934+00:00"
     },
     {
       "keyboard": "he16",
       "url": "https://raw.githubusercontent.com/gohanda11/libhmk/firmware/dev/he16/firmware.bin",
-      "size": 36632,
+      "size": 36996,
       "vid": "0xAB50",
       "pid": "0xAB16",
       "driver": "at32f405xx",
-      "commit": "e1b0e84c1ace2e86783cf5ca86d2c6d57a3f656f",
-      "built_at": "2026-09-07T13:54:20.765619+00:00"
+      "commit": "9c8ff7b9b64479e9bc571ed037acfc33cb52bbfd",
+      "built_at": "2026-09-12T04:01:13.489934+00:00"
     },
     {
       "keyboard": "he60",
       "url": "https://raw.githubusercontent.com/gohanda11/libhmk/firmware/dev/he60/firmware.bin",
-      "size": 43016,
+      "size": 43388,
       "vid": "0xAB50",
       "pid": "0xAB60",
       "driver": "stm32f446xx",
-      "commit": "e1b0e84c1ace2e86783cf5ca86d2c6d57a3f656f",
-      "built_at": "2026-09-07T13:54:20.765619+00:00"
+      "commit": "9c8ff7b9b64479e9bc571ed037acfc33cb52bbfd",
+      "built_at": "2026-09-12T04:01:13.489934+00:00"
     },
     {
       "keyboard": "he60-flexcut",
       "url": "https://raw.githubusercontent.com/gohanda11/libhmk/firmware/dev/he60-flexcut/firmware.bin",
-      "size": 39384,
+      "size": 39756,
       "vid": "0xAB50",
       "pid": "0xAB6F",
       "driver": "at32f405xx",
-      "commit": "e1b0e84c1ace2e86783cf5ca86d2c6d57a3f656f",
-      "built_at": "2026-09-07T13:54:20.765619+00:00"
+      "commit": "9c8ff7b9b64479e9bc571ed037acfc33cb52bbfd",
+      "built_at": "2026-09-12T04:01:13.489934+00:00"
     },
     {
       "keyboard": "he60-v2",
       "url": "https://raw.githubusercontent.com/gohanda11/libhmk/firmware/dev/he60-v2/firmware.bin",
-      "size": 39052,
+      "size": 39424,
       "vid": "0xAB50",
       "pid": "0xAB60",
       "driver": "at32f405xx",
-      "commit": "e1b0e84c1ace2e86783cf5ca86d2c6d57a3f656f",
-      "built_at": "2026-09-07T13:54:20.765619+00:00"
+      "commit": "9c8ff7b9b64479e9bc571ed037acfc33cb52bbfd",
+      "built_at": "2026-09-12T04:01:13.489934+00:00"
     },
     {
       "keyboard": "m256-whe",
       "url": "https://raw.githubusercontent.com/gohanda11/libhmk/firmware/dev/m256-whe/firmware.bin",
-      "size": 38908,
+      "size": 39276,
       "vid": "0xAB50",
       "pid": "0xAB65",
       "driver": "at32f405xx",
-      "commit": "e1b0e84c1ace2e86783cf5ca86d2c6d57a3f656f",
-      "built_at": "2026-09-07T13:54:20.765619+00:00"
+      "commit": "9c8ff7b9b64479e9bc571ed037acfc33cb52bbfd",
+      "built_at": "2026-09-12T04:01:13.489934+00:00"
     },
     {
       "keyboard": "split60he",
       "url": "https://raw.githubusercontent.com/gohanda11/libhmk/firmware/dev/split60he/firmware.bin",
-      "size": 50516,
+      "size": 52528,
       "vid": "0xAB50",
       "pid": "0xAB61",
       "driver": "at32f405xx",
-      "commit": "e1b0e84c1ace2e86783cf5ca86d2c6d57a3f656f",
-      "built_at": "2026-09-07T13:54:20.765619+00:00"
+      "commit": "9c8ff7b9b64479e9bc571ed037acfc33cb52bbfd",
+      "built_at": "2026-09-12T04:01:13.489934+00:00"
     }
   ]
 }
