@@ -331,8 +331,10 @@ void layout_task(void) {
   }
 
   if (should_send_reports) {
-    hid_send_reports();
-    should_send_reports = false;
+    // Keep the flag on a busy/unmounted endpoint so the pending press is
+    // retried on the next scan instead of being dropped (tap loss).
+    if (hid_send_reports())
+      should_send_reports = false;
   }
 
 #if defined(SPLIT_KEYBOARD)

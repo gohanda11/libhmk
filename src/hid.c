@@ -42,38 +42,44 @@ static bool hid_itf_ready(uint8_t itf) {
  *
  * This function will send the keyboard report to its exclusive interface.
  *
- * @return None
+ * @return true when nothing remains to send, false when a changed report is
+ * still pending (interface not mounted/ready, or the report was not queued).
+ * Pending state is kept so the next call retries the same report.
  */
-static void hid_send_keyboard_report(void) {
+static bool hid_send_keyboard_report(void) {
   static hid_nkro_kb_report_t prev_kb_report = {0};
 
   if (memcmp(&prev_kb_report, &kb_report, sizeof(prev_kb_report)) == 0)
     // Don't send the report if it hasn't changed
-    return;
+    return true;
 
   if (!hid_itf_ready(USB_ITF_KEYBOARD))
     // Host not connected or endpoint busy; retry on the next call
-    return;
+    return false;
+
+  if (!tud_hid_n_report(USB_ITF_KEYBOARD, 0, &kb_report, sizeof(kb_report)))
+    // Not queued; keep prev so the next call retries the same report
+    return false;
 
   prev_kb_report = kb_report;
-  tud_hid_n_report(USB_ITF_KEYBOARD, 0, &kb_report, sizeof(kb_report));
+  return true;
 }
 #endif
 
 /**
- * @brief Find the next available report and send it
+ * @brief Send pending reports, starting from the given report ID
  *
  * @param starting_report_id The report ID to start searching from
  *
- * @return None
+ * @return true when every report from starting_report_id onward matches its
+ * last successfully sent state, false when at least one changed report is
+ * still pending. Only reports handed to the stack update their prev state,
+ * so a pending report is retried by the next call.
  */
-static void hid_send_hid_report(uint8_t starting_report_id) {
+static bool hid_send_hid_report(uint8_t starting_report_id) {
   static uint16_t prev_system_report = 0;
   static uint16_t prev_consumer_report = 0;
   static hid_mouse_report_t prev_mouse_report = {0};
-
-  if (!hid_itf_ready(USB_ITF_HID))
-    return;
 
   for (uint8_t report_id = starting_report_id; report_id < REPORT_ID_COUNT;
        report_id++) {
@@ -82,28 +88,37 @@ static void hid_send_hid_report(uint8_t starting_report_id) {
       if (system_report == prev_system_report)
         // Don't send the report if it hasn't changed
         break;
+      if (!hid_itf_ready(USB_ITF_HID))
+        return false;
+      if (!tud_hid_n_report(USB_ITF_HID, report_id, &system_report,
+                            sizeof(system_report)))
+        return false;
       prev_system_report = system_report;
-      tud_hid_n_report(USB_ITF_HID, report_id, &system_report,
-                       sizeof(system_report));
-      return;
+      break;
 
     case REPORT_ID_CONSUMER_CONTROL:
       if (consumer_report == prev_consumer_report)
         // Don't send the report if it hasn't changed
         break;
+      if (!hid_itf_ready(USB_ITF_HID))
+        return false;
+      if (!tud_hid_n_report(USB_ITF_HID, report_id, &consumer_report,
+                            sizeof(consumer_report)))
+        return false;
       prev_consumer_report = consumer_report;
-      tud_hid_n_report(USB_ITF_HID, report_id, &consumer_report,
-                       sizeof(consumer_report));
-      return;
+      break;
 
     case REPORT_ID_MOUSE:
       if (memcmp(&prev_mouse_report, &mouse_report,
                  sizeof(prev_mouse_report)) == 0)
         // Don't send the report if it hasn't changed
         break;
+      if (!hid_itf_ready(USB_ITF_HID))
+        return false;
+      if (!tud_hid_n_report(USB_ITF_HID, report_id, &mouse_report,
+                            sizeof(mouse_report)))
+        return false;
       prev_mouse_report = mouse_report;
-      tud_hid_n_report(USB_ITF_HID, report_id, &mouse_report,
-                       sizeof(mouse_report));
       // Relative movement is consumed by the host per report, so clear it after
       // sending while preserving button state for future comparisons.
       mouse_report.x = 0;
@@ -114,12 +129,13 @@ static void hid_send_hid_report(uint8_t starting_report_id) {
       prev_mouse_report.y = 0;
       prev_mouse_report.wheel = 0;
       prev_mouse_report.pan = 0;
-      return;
+      break;
 
     default:
       break;
     }
   }
+  return true;
 }
 
 void hid_init(void) {}
@@ -268,28 +284,37 @@ void hid_send_mouse_report(void) {
   if (!hid_itf_ready(USB_ITF_HID))
     return;
 
-  hid_send_hid_report(REPORT_ID_MOUSE);
+  (void)hid_send_hid_report(REPORT_ID_MOUSE);
 #endif
 }
 
-void hid_send_reports(void) {
-#if !defined(HID_DISABLED)
+/**
+ * @brief Send all HID reports without blocking
+ *
+ * When the device is not mounted or an endpoint is busy, unsent reports stay
+ * pending and this function returns false immediately (it never waits, so
+ * boot cannot hang before enumeration). The caller retries until true.
+ *
+ * @return true when every report was flushed, false when pending remains.
+ */
+bool hid_send_reports(void) {
+#if defined(HID_DISABLED)
+  return true;
+#else
 #if defined(SPLIT_KEYBOARD)
   // Only the master half sends HID reports to the host
   if (!split_is_master())
-    return;
+    return true;
 #endif
 
   if (tud_suspended())
     // Wake up the host if it's suspended
     tud_remote_wakeup();
 
-  if (hid_itf_ready(USB_ITF_KEYBOARD))
-    hid_send_keyboard_report();
-
-  if (hid_itf_ready(USB_ITF_HID))
-    // Start from the first report ID
-    hid_send_hid_report(REPORT_ID_SYSTEM_CONTROL);
+  const bool keyboard_flushed = hid_send_keyboard_report();
+  // Start from the first report ID
+  const bool hid_flushed = hid_send_hid_report(REPORT_ID_SYSTEM_CONTROL);
+  return keyboard_flushed && hid_flushed;
 #endif
 }
 
@@ -313,7 +338,8 @@ void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id,
 
 void tud_hid_report_complete_cb(uint8_t instance, const uint8_t *report,
                                 uint16_t len) {
+  (void)len;
   if (instance == USB_ITF_HID)
     // Start from the next report ID
-    hid_send_hid_report(report[0] + 1);
+    (void)hid_send_hid_report(report[0] + 1);
 }

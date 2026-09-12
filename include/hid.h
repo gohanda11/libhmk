@@ -47,13 +47,17 @@ void hid_keycode_add(uint8_t keycode);
 void hid_keycode_remove(uint8_t keycode);
 
 /**
- * @brief Send all HID reports
+ * @brief Send all HID reports without blocking
  *
- * This function will block until the device is ready to send the reports.
+ * Never waits for the host: when the device is not mounted or an endpoint is
+ * busy, any unsent report stays pending and the function returns false
+ * immediately. The caller is expected to retry (layout_task() retries on
+ * every scan) so a transient press is delivered late rather than dropped.
+ * Once mounted and the endpoints are free, a retry flushes the pending state.
  *
- * @return None
+ * @return true when every report was flushed, false when pending remains.
  */
-void hid_send_reports(void);
+bool hid_send_reports(void);
 
 /**
  * @brief Add a mouse movement delta to the mouse HID report
