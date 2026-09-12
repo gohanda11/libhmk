@@ -138,6 +138,15 @@ static bool pending_pointing_side_config[POINTING_NUM_SIDES];
 static split_pointing_side_config_payload_t
     pending_pointing_side_payload[POINTING_NUM_SIDES];
 static uint8_t pending_pointing_side_retries[POINTING_NUM_SIDES];
+#if defined(POINTING_DEVICE_DUAL_SENSOR)
+// Dual-ball role + sensitivity relay slots (index 0 = left, 1 = right).
+// Separate slots so near-simultaneous SETs for both sides never overwrite
+// each other. A slot stays set until the slave ACKs that side
+// (SPLIT_FRAME_DUAL_ACK), with the same bounded retransmit as the side slots.
+static bool pending_dual_config[POINTING_NUM_SIDES];
+static split_dual_config_payload_t pending_dual_payload[POINTING_NUM_SIDES];
+static uint8_t pending_dual_retries[POINTING_NUM_SIDES];
+#endif
 static bool was_connected;
 // Slave-side apply report for a newly applied global config. Sent on the next
 // slave response, motion first.
@@ -145,6 +154,11 @@ static bool pending_config_ack;
 // Slave-side apply report for a newly persisted side slot (0 = none, else the
 // side id). Sent on the next slave response, motion first.
 static uint8_t pending_side_ack;
+#if defined(POINTING_DEVICE_DUAL_SENSOR)
+// Slave-side apply report for a newly applied dual slice (0 = none, else the
+// side id). Sent on the next slave response, motion first.
+static uint8_t pending_dual_ack;
+#endif
 // Last relay payload the slave applied. A retransmit carrying the identical
 // value is a duplicate (the earlier ACK was lost) and must not re-queue an
 // ACK, otherwise the two halves ping-pong forever.
@@ -152,11 +166,26 @@ static bool slave_applied_config_valid;
 static split_pointing_config_payload_t slave_applied_config;
 static bool slave_applied_side_valid[POINTING_NUM_SIDES];
 static split_pointing_side_config_payload_t slave_applied_side[POINTING_NUM_SIDES];
+#if defined(POINTING_DEVICE_DUAL_SENSOR)
+// Last dual relay payload the slave applied per side. A retransmit carrying
+// the identical value is a duplicate (the earlier ACK was lost) and must not
+// re-queue an ACK, otherwise the two halves ping-pong forever.
+static bool slave_applied_dual_valid[POINTING_NUM_SIDES];
+static split_dual_config_payload_t slave_applied_dual[POINTING_NUM_SIDES];
+#endif
 // Deferred slave flash writes. wear_leveling_write stalls long enough to blow
 // the in-transaction timing, so the RX path only stashes the value here and
 // split_slave_flush_side_writes() persists it between transactions.
 static bool slave_side_write_pending[POINTING_NUM_SIDES];
 static pointing_side_config_t slave_side_write_cfg[POINTING_NUM_SIDES];
+#if defined(POINTING_DEVICE_DUAL_SENSOR)
+// Deferred slave dual-slice flash writes. The RX path only stashes the slice
+// here and split_slave_flush_dual_writes() persists it between transactions.
+static bool slave_dual_write_pending[POINTING_NUM_SIDES];
+static uint8_t slave_dual_write_role[POINTING_NUM_SIDES];
+static uint8_t slave_dual_write_sens_pointer[POINTING_NUM_SIDES];
+static uint8_t slave_dual_write_sens_scroll[POINTING_NUM_SIDES];
+#endif
 #endif
 static bool slave_recalibrate_pending;
 // After sending RECALIBRATE to the slave, pause polling while it blocks in
@@ -205,13 +234,30 @@ static void split_promote_to_master(void) {
   pending_pointing_side_config[1] = false;
   pending_pointing_side_retries[0] = 0;
   pending_pointing_side_retries[1] = 0;
+#if defined(POINTING_DEVICE_DUAL_SENSOR)
+  pending_dual_config[0] = false;
+  pending_dual_config[1] = false;
+  pending_dual_retries[0] = 0;
+  pending_dual_retries[1] = 0;
+#endif
   pending_config_ack = false;
   pending_side_ack = 0;
+#if defined(POINTING_DEVICE_DUAL_SENSOR)
+  pending_dual_ack = 0;
+#endif
   slave_applied_config_valid = false;
   slave_applied_side_valid[0] = false;
   slave_applied_side_valid[1] = false;
+#if defined(POINTING_DEVICE_DUAL_SENSOR)
+  slave_applied_dual_valid[0] = false;
+  slave_applied_dual_valid[1] = false;
+#endif
   slave_side_write_pending[0] = false;
   slave_side_write_pending[1] = false;
+#if defined(POINTING_DEVICE_DUAL_SENSOR)
+  slave_dual_write_pending[0] = false;
+  slave_dual_write_pending[1] = false;
+#endif
   was_connected = false;
   // pointing_device_init() may have run before USB enumeration settled the
   // role, leaving the build-time defaults in place. The promoted half now
@@ -520,6 +566,23 @@ static void split_handle_config_ack(const uint8_t *payload, uint8_t payload_len,
   }
 }
 
+#if defined(POINTING_DEVICE_DUAL_SENSOR)
+// Record a slave dual-config apply report. Clears the matching master pending
+// dual slot; optionally flags that an ACK arrived during this poll.
+static void split_handle_dual_ack(const uint8_t *payload, uint8_t payload_len,
+                                  bool *ack_received) {
+  if (payload_len == sizeof(split_dual_ack_payload_t)) {
+    const uint8_t side = ((const split_dual_ack_payload_t *)payload)->side;
+    if (side == POINTING_SIDE_LEFT || side == POINTING_SIDE_RIGHT) {
+      pending_dual_config[side - 1u] = false;
+      pending_dual_retries[side - 1u] = 0;
+      if (ack_received != NULL)
+        *ack_received = true;
+    }
+  }
+}
+#endif
+
 static void split_queue_pointing_config_from_eeconfig(void) {
   // Always push the global sensor fields on reconnect. A slave-side sensor
   // needs them; on a sensor-less slave the apply is a harmless runtime-only
@@ -553,6 +616,23 @@ static void split_queue_pointing_side_config_from_eeconfig(void) {
     pending_pointing_side_retries[s] = 0;
   }
 }
+
+#if defined(POINTING_DEVICE_DUAL_SENSOR)
+static void split_queue_pointing_dual_config_from_eeconfig(void) {
+  // Push both dual slices so a late or reconnected slave converges to the
+  // master's EEPROM table even if it missed runtime SETs while offline.
+  if (!pointing_dual_config_is_valid(&eeconfig->pointing_dual))
+    return;
+  for (uint8_t s = 0; s < POINTING_NUM_SIDES; s++) {
+    pending_dual_payload[s].side = (uint8_t)(s + 1u);
+    pending_dual_payload[s].role = eeconfig->pointing_dual.roles[s];
+    pending_dual_payload[s].sens_pointer = eeconfig->pointing_dual.sens[s][0];
+    pending_dual_payload[s].sens_scroll = eeconfig->pointing_dual.sens[s][1];
+    pending_dual_config[s] = true;
+    pending_dual_retries[s] = 0;
+  }
+}
+#endif
 #endif
 
 #if defined(POINTING_DEVICE_ENABLED)
@@ -584,6 +664,20 @@ static bool split_slave_side_is_duplicate(
          prev->swap_axes == incoming->swap_axes;
 }
 
+#if defined(POINTING_DEVICE_DUAL_SENSOR)
+// True when a relayed dual payload carries nothing new for its slot.
+static bool
+split_slave_dual_is_duplicate(const split_dual_config_payload_t *incoming) {
+  const uint8_t idx = (uint8_t)(incoming->side - 1u);
+  if (idx >= POINTING_NUM_SIDES || !slave_applied_dual_valid[idx])
+    return false;
+  const split_dual_config_payload_t *prev = &slave_applied_dual[idx];
+  return prev->side == incoming->side && prev->role == incoming->role &&
+         prev->sens_pointer == incoming->sens_pointer &&
+         prev->sens_scroll == incoming->sens_scroll;
+}
+#endif
+
 // Persist side configs stashed by the RX path. Runs between transactions so a
 // slow flash write never eats into the follow-up timing. A failed write keeps
 // its stash and is retried on a later call; each reception is written exactly
@@ -600,6 +694,34 @@ static void split_slave_flush_side_writes(void) {
       slave_side_write_pending[s] = false;
   }
 }
+
+#if defined(POINTING_DEVICE_DUAL_SENSOR)
+// Persist dual slices stashed by the RX path. Runs between transactions so a
+// slow flash write never eats into the follow-up timing. A failed write keeps
+// its stash and is retried on a later call; each reception is written exactly
+// once.
+static void split_slave_flush_dual_writes(void) {
+  const uint32_t dual_base = (uint32_t)offsetof(eeconfig_t, pointing_dual);
+  const uint32_t roles_off =
+      (uint32_t)offsetof(pointing_dual_config_t, roles);
+  const uint32_t sens_off = (uint32_t)offsetof(pointing_dual_config_t, sens);
+  for (uint8_t s = 0; s < POINTING_NUM_SIDES; s++) {
+    if (!slave_dual_write_pending[s])
+      continue;
+    const uint8_t role = slave_dual_write_role[s];
+    const uint8_t sens_pair[2] = {slave_dual_write_sens_pointer[s],
+                                  slave_dual_write_sens_scroll[s]};
+    if (!wear_leveling_write(dual_base + roles_off + (uint32_t)s, &role,
+                             sizeof(role)))
+      continue;
+    if (!wear_leveling_write(
+            dual_base + sens_off + (uint32_t)s * 2u, sens_pair,
+            sizeof(sens_pair)))
+      continue;
+    slave_dual_write_pending[s] = false;
+  }
+}
+#endif
 #endif
 
 static void split_update_connection(bool success) {
@@ -611,6 +733,9 @@ static void split_update_connection(bool success) {
     if (is_master && !was_connected) {
       split_queue_pointing_config_from_eeconfig();
       split_queue_pointing_side_config_from_eeconfig();
+#if defined(POINTING_DEVICE_DUAL_SENSOR)
+      split_queue_pointing_dual_config_from_eeconfig();
+#endif
     }
     was_connected = true;
 #endif
@@ -666,14 +791,23 @@ static void split_master_task(void) {
   const bool send_control = pending_control_command != 0;
 #if defined(POINTING_DEVICE_ENABLED)
   // One pointing follow-up per poll (see the send section): the global frame
-  // wins while pending so the two slots never double the follow-up traffic.
+  // wins while pending, then the side frame, then the dual frame, so the
+  // slots never double the follow-up traffic.
   const bool send_pointing_config = pending_pointing_config;
   const bool send_pointing_side_config =
       !send_pointing_config && (pending_pointing_side_config[0] ||
                                 pending_pointing_side_config[1]);
+#if defined(POINTING_DEVICE_DUAL_SENSOR)
+  const bool send_dual_config =
+      !send_pointing_config && !send_pointing_side_config &&
+      (pending_dual_config[0] || pending_dual_config[1]);
+#else
+  const bool send_dual_config = false;
+#endif
 #else
   const bool send_pointing_config = false;
   const bool send_pointing_side_config = false;
+  const bool send_dual_config = false;
 #endif
 
   split_poll_payload_t poll_payload = {.flags = 0};
@@ -687,6 +821,8 @@ static void split_master_task(void) {
     poll_payload.flags |= SPLIT_POLL_FLAG_FOLLOWUP_POINTING_CONFIG;
   if (send_pointing_side_config)
     poll_payload.flags |= SPLIT_POLL_FLAG_FOLLOWUP_POINTING_SIDE_CONFIG;
+  if (send_dual_config)
+    poll_payload.flags |= SPLIT_POLL_FLAG_FOLLOWUP_DUAL_CONFIG;
 
   if (!split_send_frame(SPLIT_FRAME_POLL, (uint8_t *)&poll_payload,
                         sizeof(poll_payload))) {
@@ -793,6 +929,14 @@ static void split_master_task(void) {
         split_handle_config_ack(payload, payload_len, &ack_received_this_poll);
         continue;
       }
+#if defined(POINTING_DEVICE_DUAL_SENSOR)
+      if (type == SPLIT_FRAME_DUAL_ACK) {
+        // Slave apply report for a dual slice: clears that side's pending
+        // dual slot. Keep waiting for the remaining analog chunks.
+        split_handle_dual_ack(payload, payload_len, &ack_received_this_poll);
+        continue;
+      }
+#endif
 #endif
       break;
     }
@@ -801,11 +945,11 @@ static void split_master_task(void) {
   // Pointing is best-effort. A miss after a good KEY_STATE must not count as a
   // link failure — that regression made the remote half look completely dead.
 #if defined(POINTING_DEVICE_ENABLED)
-  // The slave reports applied global/side slots right after KEY_STATE, so the
-  // slave may send POINTING plus CONFIG_ACK plus SIDE_ACK in one response;
-  // collect up to one of each.
+  // The slave reports applied global/side/dual slots right after KEY_STATE, so
+  // the slave may send POINTING plus CONFIG_ACK plus SIDE_ACK plus DUAL_ACK
+  // in one response; collect up to one of each.
   if (POINTING_DEVICE_ON_REMOTE_HALF && !have_pointing) {
-    for (uint8_t i = 0; i < 3; i++) {
+    for (uint8_t i = 0; i < 4; i++) {
       if (!split_receive_frame(&type, payload, &payload_len,
                                SPLIT_CONNECTION_TIMEOUT_MS))
         break;
@@ -823,6 +967,12 @@ static void split_master_task(void) {
         split_handle_config_ack(payload, payload_len, &ack_received_this_poll);
         continue;
       }
+#if defined(POINTING_DEVICE_DUAL_SENSOR)
+      if (type == SPLIT_FRAME_DUAL_ACK) {
+        split_handle_dual_ack(payload, payload_len, &ack_received_this_poll);
+        continue;
+      }
+#endif
       break;
     }
   }
@@ -834,14 +984,22 @@ static void split_master_task(void) {
   // only consume frames already sitting in the RX FIFO and never wait, so the
   // poll period stays flat. A missing ACK keeps the slot pending and the
   // follow-up below retransmits it (bounded by the retry cap) on the next
-  // poll. Drain up to two frames: the pointing loop above may already have
-  // consumed one ACK, leaving the other still in flight, and the slave may
-  // send both ACKs in one response.
+  // poll. Drain up to three frames: the pointing loop above may already have
+  // consumed one ACK, leaving the others still in flight, and the slave may
+  // send all ACKs in one response.
   if (pending_pointing_side_config[0] || pending_pointing_side_config[1] ||
-      pending_pointing_config) {
-    for (uint8_t i = 0; i < 2; i++) {
+      pending_pointing_config
+#if defined(POINTING_DEVICE_DUAL_SENSOR)
+      || pending_dual_config[0] || pending_dual_config[1]
+#endif
+  ) {
+    for (uint8_t i = 0; i < 3; i++) {
       if (!pending_pointing_side_config[0] &&
-          !pending_pointing_side_config[1] && !pending_pointing_config)
+          !pending_pointing_side_config[1] && !pending_pointing_config
+#if defined(POINTING_DEVICE_DUAL_SENSOR)
+          && !pending_dual_config[0] && !pending_dual_config[1]
+#endif
+      )
         break;
       // Peek only: nothing waiting means the ACK simply has not arrived yet.
       if (!split_transport_available())
@@ -856,6 +1014,12 @@ static void split_master_task(void) {
         split_handle_config_ack(payload, payload_len, &ack_received_this_poll);
         continue;
       }
+#if defined(POINTING_DEVICE_DUAL_SENSOR)
+      if (type == SPLIT_FRAME_DUAL_ACK) {
+        split_handle_dual_ack(payload, payload_len, &ack_received_this_poll);
+        continue;
+      }
+#endif
       if (type == SPLIT_FRAME_POINTING &&
           payload_len == sizeof(split_pointing_payload_t) &&
           POINTING_DEVICE_ON_REMOTE_HALF && !have_pointing) {
@@ -944,6 +1108,24 @@ followup:
         pending_pointing_side_retries[side_idx]++;
       }
     }
+#if defined(POINTING_DEVICE_DUAL_SENSOR)
+  } else if (send_dual_config) {
+    // Lowest priority of the pointing follow-ups; the global and side frames
+    // above win while pending. Same bounded retransmit as the side slots.
+    const uint8_t dual_idx = pending_dual_config[0] ? 0 : 1;
+    split_send_frame(SPLIT_FRAME_DUAL_CONFIG,
+                     (uint8_t *)&pending_dual_payload[dual_idx],
+                     sizeof(pending_dual_payload[dual_idx]));
+    if (pending_dual_config[dual_idx]) {
+      if (pending_dual_retries[dual_idx] >=
+          SPLIT_POINTING_CONFIG_MAX_RETRIES) {
+        pending_dual_config[dual_idx] = false;
+        pending_dual_retries[dual_idx] = 0;
+      } else {
+        pending_dual_retries[dual_idx]++;
+      }
+    }
+#endif
   }
 #endif
 
@@ -986,6 +1168,15 @@ static void split_slave_send_acks(void) {
                          (uint8_t *)&ack_payload, sizeof(ack_payload)))
       pending_side_ack = 0;
   }
+#if defined(POINTING_DEVICE_DUAL_SENSOR)
+  if (pending_dual_ack != 0) {
+    const split_dual_ack_payload_t dual_ack_payload = {.side =
+                                                           pending_dual_ack};
+    if (split_send_frame(SPLIT_FRAME_DUAL_ACK, (uint8_t *)&dual_ack_payload,
+                         sizeof(dual_ack_payload)))
+      pending_dual_ack = 0;
+  }
+#endif
 }
 #endif
 
@@ -997,6 +1188,9 @@ static void split_slave_task(void) {
   // Drain stashed flash writes between transactions, never inside one, so a
   // slow write cannot blow the follow-up timing below.
   split_slave_flush_side_writes();
+#if defined(POINTING_DEVICE_DUAL_SENSOR)
+  split_slave_flush_dual_writes();
+#endif
 #endif
 
   // Wait for a poll from the master. This also works for full-duplex, as the
@@ -1026,6 +1220,8 @@ static void split_slave_task(void) {
     if (poll->flags & SPLIT_POLL_FLAG_FOLLOWUP_POINTING_CONFIG)
       expected_followups++;
     if (poll->flags & SPLIT_POLL_FLAG_FOLLOWUP_POINTING_SIDE_CONFIG)
+      expected_followups++;
+    if (poll->flags & SPLIT_POLL_FLAG_FOLLOWUP_DUAL_CONFIG)
       expected_followups++;
   }
 
@@ -1190,6 +1386,53 @@ static void split_slave_task(void) {
         }
         remaining--;
         break;
+#if defined(POINTING_DEVICE_DUAL_SENSOR)
+      case SPLIT_FRAME_DUAL_CONFIG:
+        if (payload_len == sizeof(split_dual_config_payload_t)) {
+          const split_dual_config_payload_t *dual_payload =
+              (const split_dual_config_payload_t *)payload;
+          const uint8_t side = dual_payload->side;
+          const uint8_t role = dual_payload->role;
+          const uint8_t sens_pointer = dual_payload->sens_pointer;
+          const uint8_t sens_scroll = dual_payload->sens_scroll;
+          if ((side == POINTING_SIDE_LEFT || side == POINTING_SIDE_RIGHT) &&
+              role <= POINTING_ROLE_DISABLED &&
+              sens_pointer >= POINTING_SENSITIVITY_MIN &&
+              sens_pointer <= POINTING_SENSITIVITY_MAX &&
+              sens_scroll >= POINTING_SENSITIVITY_MIN &&
+              sens_scroll <= POINTING_SENSITIVITY_MAX) {
+            if (!split_slave_dual_is_duplicate(dual_payload)) {
+              const uint8_t idx = (uint8_t)(side - 1u);
+              // Record first so duplicate retransmits are recognized even
+              // before the deferred flash write below lands.
+              slave_applied_dual[idx] = *dual_payload;
+              slave_applied_dual_valid[idx] = true;
+              // Apply and persist only the slice this half owns; the master
+              // stays authoritative for the full table and clears its
+              // per-side pending on the ACK below regardless of ownership.
+              if (side == pointing_device_my_side()) {
+                pointing_device_apply_dual_local(side, role, sens_pointer,
+                                                 sens_scroll);
+                // Stash the EEPROM write for between transactions: flash
+                // stalls long enough to blow the follow-up timing, so the RX
+                // path must not write here. The write for this reception
+                // happens in split_slave_flush_dual_writes(), never twice.
+                slave_dual_write_role[idx] = role;
+                slave_dual_write_sens_pointer[idx] = sens_pointer;
+                slave_dual_write_sens_scroll[idx] = sens_scroll;
+                slave_dual_write_pending[idx] = true;
+              }
+              // Queue the apply report even when this half does not own the
+              // side: the master clears its per-side dual pending (and stops
+              // retransmitting) only on this ACK, so report only genuinely
+              // new values.
+              pending_dual_ack = side;
+            }
+          }
+        }
+        remaining--;
+        break;
+#endif
 #endif
 
       default:
@@ -1239,13 +1482,30 @@ void split_pre_init(void) {
   pending_pointing_side_config[1] = false;
   pending_pointing_side_retries[0] = 0;
   pending_pointing_side_retries[1] = 0;
+#if defined(POINTING_DEVICE_DUAL_SENSOR)
+  pending_dual_config[0] = false;
+  pending_dual_config[1] = false;
+  pending_dual_retries[0] = 0;
+  pending_dual_retries[1] = 0;
+#endif
   pending_config_ack = false;
   pending_side_ack = 0;
+#if defined(POINTING_DEVICE_DUAL_SENSOR)
+  pending_dual_ack = 0;
+#endif
   slave_applied_config_valid = false;
   slave_applied_side_valid[0] = false;
   slave_applied_side_valid[1] = false;
+#if defined(POINTING_DEVICE_DUAL_SENSOR)
+  slave_applied_dual_valid[0] = false;
+  slave_applied_dual_valid[1] = false;
+#endif
   slave_side_write_pending[0] = false;
   slave_side_write_pending[1] = false;
+#if defined(POINTING_DEVICE_DUAL_SENSOR)
+  slave_dual_write_pending[0] = false;
+  slave_dual_write_pending[1] = false;
+#endif
   was_connected = false;
 #endif
   slave_recalibrate_pending = false;
@@ -1385,6 +1645,43 @@ bool split_send_pointing_side_config(uint8_t side, uint16_t rotation_deg,
   (void)invert_x;
   (void)invert_y;
   (void)swap_axes;
+  return false;
+#endif
+}
+
+bool split_send_dual_config(uint8_t side, uint8_t role, uint8_t sens_pointer,
+                            uint8_t sens_scroll) {
+#if defined(POINTING_DEVICE_ENABLED) && defined(POINTING_DEVICE_DUAL_SENSOR)
+  if (!is_master)
+    return false;
+  if (side != POINTING_SIDE_LEFT && side != POINTING_SIDE_RIGHT)
+    return false;
+  if (role > POINTING_ROLE_DISABLED)
+    return false;
+  if (sens_pointer < POINTING_SENSITIVITY_MIN ||
+      sens_pointer > POINTING_SENSITIVITY_MAX)
+    return false;
+  if (sens_scroll < POINTING_SENSITIVITY_MIN ||
+      sens_scroll > POINTING_SENSITIVITY_MAX)
+    return false;
+  // Queue into the per-side dual slot: a newer SET for the same side
+  // overwrites the payload, while the other side's slot is untouched. The
+  // master task sends one dual frame per poll and the slot clears when the
+  // slave ACKs that side (or when the retry cap gives up); a fresh queue
+  // restarts the retry budget.
+  const uint8_t idx = (uint8_t)(side - 1u);
+  pending_dual_payload[idx].side = side;
+  pending_dual_payload[idx].role = role;
+  pending_dual_payload[idx].sens_pointer = sens_pointer;
+  pending_dual_payload[idx].sens_scroll = sens_scroll;
+  pending_dual_config[idx] = true;
+  pending_dual_retries[idx] = 0;
+  return true;
+#else
+  (void)side;
+  (void)role;
+  (void)sens_pointer;
+  (void)sens_scroll;
   return false;
 #endif
 }

@@ -141,6 +141,19 @@ static bool v1_11_profile_config_func(uint8_t profile, uint8_t *dst,
    MIGRATION_V1_11_POINTING_CONFIG_SIZE + 2 * MIGRATION_V1_11_SIDE_CONFIG_SIZE)
 #define MIGRATION_V1_11_PROFILE_CONFIG_SIZE MIGRATION_V1_10_PROFILE_CONFIG_SIZE
 
+static bool v1_12_global_config_func(uint8_t *dst, const uint8_t *src);
+static bool v1_12_profile_config_func(uint8_t profile, uint8_t *dst,
+                                      const uint8_t *src);
+
+// v1.12: append the dual-ball per-side role + sensitivity configuration (6B:
+// roles[2] + sens[2][2]) after the per-side orientation slots. Existing
+// global bytes (including pointing_side) are preserved verbatim; the new
+// field is seeded with the build-time dual defaults.
+#define MIGRATION_V1_12_DUAL_CONFIG_SIZE 6
+#define MIGRATION_V1_12_GLOBAL_CONFIG_SIZE                                   \
+  (MIGRATION_V1_11_GLOBAL_CONFIG_SIZE + MIGRATION_V1_12_DUAL_CONFIG_SIZE)
+#define MIGRATION_V1_12_PROFILE_CONFIG_SIZE MIGRATION_V1_11_PROFILE_CONFIG_SIZE
+
 
 // Migration metadata for each configuration version. The first entry is
 // reserved for the initial version (v1.0) which does not require migration.
@@ -227,12 +240,19 @@ static const migration_t migrations[] = {
         .global_config_func = v1_11_global_config_func,
         .profile_config_func = v1_11_profile_config_func,
     },
+    {
+        .version = 0x010c,
+        .global_config_size = MIGRATION_V1_12_GLOBAL_CONFIG_SIZE,
+        .profile_config_size = MIGRATION_V1_12_PROFILE_CONFIG_SIZE,
+        .global_config_func = v1_12_global_config_func,
+        .profile_config_func = v1_12_profile_config_func,
+    },
 };
 // An assertion to remind us to bump the persistent configuration version, and
 // implement a migration function if there is a change to the configuration
 // type. Update the assertion when a new version is added.
-_Static_assert(MIGRATION_V1_11_GLOBAL_CONFIG_SIZE +
-                       NUM_PROFILES * MIGRATION_V1_11_PROFILE_CONFIG_SIZE ==
+_Static_assert(MIGRATION_V1_12_GLOBAL_CONFIG_SIZE +
+                       NUM_PROFILES * MIGRATION_V1_12_PROFILE_CONFIG_SIZE ==
                    offsetof(eeconfig_t, magic_end),
                "Invalid configuration size");
 _Static_assert(sizeof(pointing_config_t) == MIGRATION_V1_11_POINTING_CONFIG_SIZE,
@@ -240,6 +260,9 @@ _Static_assert(sizeof(pointing_config_t) == MIGRATION_V1_11_POINTING_CONFIG_SIZE
 _Static_assert(sizeof(pointing_side_config_t) ==
                    MIGRATION_V1_11_SIDE_CONFIG_SIZE,
                "pointing_side_config_t must be 5 bytes");
+_Static_assert(sizeof(pointing_dual_config_t) ==
+                   MIGRATION_V1_12_DUAL_CONFIG_SIZE,
+               "pointing_dual_config_t must be 6 bytes");
 
 // An assertion to remind us if there is a breaking change to `MACRO_NODE_NONE`.
 // Update the assertion when a new version is added.
@@ -847,6 +870,49 @@ bool v1_11_profile_config_func(uint8_t profile, uint8_t *dst,
 
   // Profiles are unchanged in v1.11; keep the user keymaps/macros as-is.
   migration_memcpy(&dst, &src, MIGRATION_V1_10_PROFILE_CONFIG_SIZE);
+
+  return true;
+}
+
+//--------------------------------------------------------------------+
+// v1.11 -> v1.12 Migration (dual-ball role + sensitivity)
+//--------------------------------------------------------------------+
+
+bool v1_12_global_config_func(uint8_t *dst, const uint8_t *src) {
+  if (((const eeconfig_t *)src)->version != 0x010b)
+    // Expected version v1.11
+    return false;
+
+  // Copy the whole v1.11 global config verbatim, preserving the per-side
+  // orientation slots as the user left them.
+  migration_memcpy(&dst, &src, MIGRATION_V1_11_GLOBAL_CONFIG_SIZE);
+
+  // Overwrite the left orientation slot with the dual-build default. A v1.11
+  // EEPROM predates dual firmware, so its left slot can only hold the legacy
+  // non-sensor-side seed (rotation 0 on split60he); with the left ball now
+  // present, the slot must start from the 180-degree default or the left ball
+  // would move backwards until fixed in hmkstudio. The right slot is
+  // preserved verbatim because it may carry real user edits.
+  uint8_t *left_slot = dst - 2 * MIGRATION_V1_11_SIDE_CONFIG_SIZE;
+  const pointing_side_config_t left_default =
+      DEFAULT_POINTING_SIDE_CONFIG_LEFT;
+  memcpy(left_slot, &left_default, sizeof(left_default));
+
+  // Seed the new dual-ball field with the build-time defaults (left scroll /
+  // right cursor, all sensitivities 100 percent).
+  const pointing_dual_config_t dual_default = DEFAULT_POINTING_DUAL_CONFIG;
+  const uint8_t *dual_src = (const uint8_t *)&dual_default;
+  migration_memcpy(&dst, &dual_src, sizeof(pointing_dual_config_t));
+
+  return true;
+}
+
+bool v1_12_profile_config_func(uint8_t profile, uint8_t *dst,
+                               const uint8_t *src) {
+  (void)profile;
+
+  // Profiles are unchanged in v1.12; keep the user keymaps/macros as-is.
+  migration_memcpy(&dst, &src, MIGRATION_V1_11_PROFILE_CONFIG_SIZE);
 
   return true;
 }

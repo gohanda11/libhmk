@@ -375,6 +375,9 @@ if kb_json.pointing_device is not None and kb_json.pointing_device.enabled:
         # Dual-sensor build: both halves carry a sensor on the same wiring.
         build_flags.define("POINTING_DEVICE_SIDE_LEFT")
         build_flags.define("POINTING_DEVICE_SIDE_RIGHT")
+        # The left sensor is mounted rotated 180 degrees relative to the
+        # right one; seed its default orientation slot accordingly.
+        build_flags.define("DEFAULT_POINTING_SIDE_LEFT_ROTATION_DEG", 180)
     elif pd.side == "left":
         build_flags.define("POINTING_DEVICE_SIDE_LEFT")
     else:

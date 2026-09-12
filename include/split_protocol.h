@@ -26,7 +26,7 @@
 
 // Protocol version. Frames with a mismatched version are rejected so halves
 // running incompatible firmware fail fast instead of misreading payloads.
-#define SPLIT_PROTOCOL_VERSION 3
+#define SPLIT_PROTOCOL_VERSION 4
 
 // Maximum payload size for a single frame
 #define SPLIT_MAX_PAYLOAD_SIZE 128
@@ -62,6 +62,13 @@ typedef enum {
   // follow-up; the master clears its pending global slot only on this ACK so
   // a lost follow-up is retransmitted on later polls.
   SPLIT_FRAME_POINTING_CONFIG_ACK = 0x09,
+  // Master -> Slave: dual-ball per-side role + sensitivity relay
+  SPLIT_FRAME_DUAL_CONFIG = 0x0A,
+  // Slave -> Master: dual-config apply report (payload: side u8). Same
+  // discipline as SPLIT_FRAME_POINTING_SIDE_ACK: sent right after KEY_STATE
+  // when the slave has newly applied a DUAL_CONFIG follow-up; the master
+  // clears that side's pending dual slot only on this ACK.
+  SPLIT_FRAME_DUAL_ACK = 0x0B,
 } split_frame_type_t;
 
 //--------------------------------------------------------------------+
@@ -79,6 +86,9 @@ typedef enum {
   SPLIT_POLL_FLAG_FOLLOWUP_POINTING_CONFIG = 0x08,
   // Master will send a pointing side-config frame after the slave response
   SPLIT_POLL_FLAG_FOLLOWUP_POINTING_SIDE_CONFIG = 0x10,
+  // Master will send a dual-ball role + sensitivity frame after the slave
+  // response
+  SPLIT_POLL_FLAG_FOLLOWUP_DUAL_CONFIG = 0x20,
 } split_poll_flags_t;
 
 //--------------------------------------------------------------------+
@@ -153,6 +163,26 @@ typedef struct __attribute__((packed)) {
 
 _Static_assert(sizeof(split_side_ack_payload_t) == 1,
                "Side ACK payload must be 1 byte");
+
+// Dual-ball per-side role + sensitivity relay (master -> slave)
+typedef struct __attribute__((packed)) {
+  uint8_t side;         // POINTING_SIDE_LEFT(1) / POINTING_SIDE_RIGHT(2)
+  uint8_t role;         // POINTING_ROLE_*
+  uint8_t sens_pointer; // percent, 10..200
+  uint8_t sens_scroll;  // percent, 10..200
+} split_dual_config_payload_t;
+
+_Static_assert(sizeof(split_dual_config_payload_t) == 4,
+               "Dual config payload must be 4 bytes");
+
+typedef struct __attribute__((packed)) {
+  // POINTING_SIDE_LEFT / POINTING_SIDE_RIGHT: the dual side slot just applied.
+  // Same shape as split_side_ack_payload_t.
+  uint8_t side;
+} split_dual_ack_payload_t;
+
+_Static_assert(sizeof(split_dual_ack_payload_t) == 1,
+               "Dual ACK payload must be 1 byte");
 
 //--------------------------------------------------------------------+
 // Split Protocol API

@@ -360,6 +360,18 @@ static void command_process(void) {
               slot->invert_y ? 1 : 0, slot->swap_axes ? 1 : 0);
         }
       }
+#if defined(POINTING_DEVICE_DUAL_SENSOR)
+      // Re-push both dual-ball slices so the slave converges to the reset
+      // defaults; validity is whole-struct, so check once for both sides.
+      if (pointing_dual_config_is_valid(&eeconfig->pointing_dual)) {
+        for (uint8_t s = 0; s < POINTING_NUM_SIDES; s++) {
+          split_send_dual_config(
+              (uint8_t)(s + 1u), eeconfig->pointing_dual.roles[s],
+              eeconfig->pointing_dual.sens[s][0],
+              eeconfig->pointing_dual.sens[s][1]);
+        }
+      }
+#endif
     }
 #endif
 #endif
@@ -607,7 +619,9 @@ static void command_process(void) {
     const pointing_side_config_t *scfg = &eeconfig->pointing_side[idx];
     // Repair-on-read so a corrupted slot never reaches the host.
     pointing_side_config_t def =
-        (pointing_side_config_t)DEFAULT_POINTING_SIDE_CONFIG;
+        (side == POINTING_SIDE_LEFT)
+            ? (pointing_side_config_t)DEFAULT_POINTING_SIDE_CONFIG_LEFT
+            : (pointing_side_config_t)DEFAULT_POINTING_SIDE_CONFIG_RIGHT;
     if (!pointing_side_config_is_valid(scfg))
       scfg = &def;
     // Only the side that actually carries a sensor is reported as supported;
@@ -661,6 +675,92 @@ static void command_process(void) {
     COMMAND_VERIFY(p->invert_x <= 1);
     COMMAND_VERIFY(p->invert_y <= 1);
     COMMAND_VERIFY(p->swap_axes <= 1);
+    success = true;
+#endif
+    break;
+  }
+  case COMMAND_GET_DUAL_CONFIG: {
+#if defined(POINTING_DEVICE_ENABLED)
+    const uint8_t side = in->get_dual_config.side;
+    COMMAND_VERIFY(side == POINTING_SIDE_LEFT ||
+                   side == POINTING_SIDE_RIGHT);
+    const uint8_t idx = (uint8_t)(side - 1);
+    const pointing_dual_config_t *dcfg = &eeconfig->pointing_dual;
+    // Repair-on-read so a corrupted table never reaches the host.
+    pointing_dual_config_t def =
+        (pointing_dual_config_t)DEFAULT_POINTING_DUAL_CONFIG;
+    if (!pointing_dual_config_is_valid(dcfg))
+      dcfg = &def;
+    // Only sides that carry a sensor report supported; dual-sensor builds
+    // answer 1 for both sides so the host shows both panels.
+    out->dual_config.supported =
+        pointing_device_side_supported(side) ? 1 : 0;
+    out->dual_config.side = side;
+    out->dual_config.role = dcfg->roles[idx];
+    out->dual_config.sens_pointer = dcfg->sens[idx][0];
+    out->dual_config.sens_scroll = dcfg->sens[idx][1];
+#else
+    const uint8_t side = in->get_dual_config.side;
+    COMMAND_VERIFY(side == POINTING_SIDE_LEFT ||
+                   side == POINTING_SIDE_RIGHT);
+    const pointing_dual_config_t *dcfg = &eeconfig->pointing_dual;
+    pointing_dual_config_t def =
+        (pointing_dual_config_t)DEFAULT_POINTING_DUAL_CONFIG;
+    if (!pointing_dual_config_is_valid(dcfg))
+      dcfg = &def;
+    const uint8_t idx = (uint8_t)(side - 1);
+    out->dual_config.supported = 0;
+    out->dual_config.side = side;
+    out->dual_config.role = dcfg->roles[idx];
+    out->dual_config.sens_pointer = dcfg->sens[idx][0];
+    out->dual_config.sens_scroll = dcfg->sens[idx][1];
+#endif
+    break;
+  }
+  case COMMAND_SET_DUAL_CONFIG: {
+    const command_in_dual_config_t *p = &in->dual_config;
+#if defined(POINTING_DEVICE_ENABLED)
+    COMMAND_VERIFY(p->side == POINTING_SIDE_LEFT ||
+                   p->side == POINTING_SIDE_RIGHT);
+    COMMAND_VERIFY(p->role <= POINTING_ROLE_DISABLED);
+    COMMAND_VERIFY(p->sens_pointer >= POINTING_SENSITIVITY_MIN &&
+                   p->sens_pointer <= POINTING_SENSITIVITY_MAX);
+    COMMAND_VERIFY(p->sens_scroll >= POINTING_SENSITIVITY_MIN &&
+                   p->sens_scroll <= POINTING_SENSITIVITY_MAX);
+    const uint8_t idx = (uint8_t)(p->side - 1);
+    // Persistence stays here; the runtime helpers below never touch flash.
+    // Start from the stored table (repaired when corrupt) so the untouched
+    // side survives, then persist the whole table in one write.
+    pointing_dual_config_t updated = eeconfig->pointing_dual;
+    if (!pointing_dual_config_is_valid(&updated))
+      updated = (pointing_dual_config_t)DEFAULT_POINTING_DUAL_CONFIG;
+    updated.roles[idx] = p->role;
+    updated.sens[idx][0] = p->sens_pointer;
+    updated.sens[idx][1] = p->sens_scroll;
+    success = wear_leveling_write(offsetof(eeconfig_t, pointing_dual),
+                                  &updated, sizeof(updated));
+#if defined(POINTING_DEVICE_DUAL_SENSOR)
+    if (success) {
+      // Update the master runtime slice; relay to the slave only when the
+      // targeted side lives on the remote half.
+      pointing_device_apply_dual_local(p->side, p->role, p->sens_pointer,
+                                       p->sens_scroll);
+#if defined(SPLIT_KEYBOARD)
+      if (p->side != pointing_device_my_side())
+        split_send_dual_config(p->side, p->role, p->sens_pointer,
+                               p->sens_scroll);
+#endif
+    }
+#endif
+#else
+    COMMAND_VERIFY(p->side == POINTING_SIDE_LEFT ||
+                   p->side == POINTING_SIDE_RIGHT);
+    COMMAND_VERIFY(p->role <= POINTING_ROLE_DISABLED);
+    COMMAND_VERIFY(p->sens_pointer >= POINTING_SENSITIVITY_MIN &&
+                   p->sens_pointer <= POINTING_SENSITIVITY_MAX);
+    COMMAND_VERIFY(p->sens_scroll >= POINTING_SENSITIVITY_MIN &&
+                   p->sens_scroll <= POINTING_SENSITIVITY_MAX);
+    // Unsupported keyboards accept SET as a no-op success.
     success = true;
 #endif
     break;

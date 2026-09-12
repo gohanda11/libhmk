@@ -48,6 +48,8 @@ typedef enum {
   COMMAND_SET_POINTING_CONFIG = 20,
   COMMAND_GET_SIDE_CONFIG = 21,
   COMMAND_SET_SIDE_CONFIG = 22,
+  COMMAND_GET_DUAL_CONFIG = 23,
+  COMMAND_SET_DUAL_CONFIG = 24,
 
   COMMAND_GET_KEYMAP = 128,
   COMMAND_SET_KEYMAP,
@@ -145,6 +147,22 @@ typedef struct __attribute__((packed)) {
 _Static_assert(sizeof(command_in_side_config_t) == 6,
                "SET_SIDE_CONFIG payload must be 6 bytes");
 
+// GET_DUAL_CONFIG input: side selector (POINTING_SIDE_LEFT/RIGHT).
+typedef struct __attribute__((packed)) {
+  uint8_t side;
+} command_in_get_dual_config_t;
+
+// SET_DUAL_CONFIG payload: side + per-side role + sensitivity pair.
+typedef struct __attribute__((packed)) {
+  uint8_t side;
+  uint8_t role;
+  uint8_t sens_pointer;
+  uint8_t sens_scroll;
+} command_in_dual_config_t;
+
+_Static_assert(sizeof(command_in_dual_config_t) == 4,
+               "SET_DUAL_CONFIG payload must be 4 bytes");
+
 typedef struct __attribute__((packed)) {
   uint8_t profile;
   uint8_t layer;
@@ -226,6 +244,8 @@ typedef struct __attribute__((packed)) {
     command_in_pointing_config_t pointing_config;
     command_in_get_side_config_t get_side_config;
     command_in_side_config_t side_config;
+    command_in_get_dual_config_t get_dual_config;
+    command_in_dual_config_t dual_config;
 
     command_in_keymap_t keymap;
     command_in_actuation_map_t actuation_map;
@@ -300,6 +320,19 @@ typedef struct __attribute__((packed)) {
 _Static_assert(sizeof(command_out_side_config_t) == 6,
                "GET_SIDE_CONFIG response must be 6 bytes");
 
+// GET_DUAL_CONFIG response: supported + side echo + per-side role and
+// sensitivity pair.
+typedef struct __attribute__((packed)) {
+  uint8_t supported;
+  uint8_t side;
+  uint8_t role;
+  uint8_t sens_pointer;
+  uint8_t sens_scroll;
+} command_out_dual_config_t;
+
+_Static_assert(sizeof(command_out_dual_config_t) == 5,
+               "GET_DUAL_CONFIG response must be 5 bytes");
+
 typedef struct __attribute__((packed)) {
   // Number of valid bytes in `data`
   uint8_t len;
@@ -322,6 +355,8 @@ typedef struct __attribute__((packed)) {
     command_out_pointing_config_t pointing_config;
     // For `COMMAND_GET_SIDE_CONFIG`
     command_out_side_config_t side_config;
+    // For `COMMAND_GET_DUAL_CONFIG`
+    command_out_dual_config_t dual_config;
     // For `COMMAND_GET_CALIBRATION`
     eeconfig_calibration_t calibration;
     // For `COMMAND_GET_PROFILE`

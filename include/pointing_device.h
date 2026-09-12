@@ -198,5 +198,44 @@ void pointing_device_apply_side_local(const pointing_side_config_t *cfg);
  */
 void pointing_device_set_side_config(uint8_t side,
                                      const pointing_side_config_t *cfg);
+
+#if defined(POINTING_DEVICE_DUAL_SENSOR)
+/**
+ * @brief Copy the runtime dual-ball role + sensitivity configuration
+ *
+ * @param out Destination to copy the runtime configuration into
+ *
+ * @return None
+ */
+void pointing_device_get_dual_config(pointing_dual_config_t *out);
+
+/**
+ * @brief Apply a full dual config as runtime state
+ *
+ * Persistence is the caller's responsibility. On the master, the remote
+ * side's slice is relayed over the split link.
+ *
+ * @param cfg Dual configuration to apply
+ *
+ * @return None
+ */
+void pointing_device_set_dual_config(const pointing_dual_config_t *cfg);
+
+/**
+ * @brief Apply one side's slice locally without persisting or relaying
+ *
+ * Used by the slave RX path to apply a relayed slice.
+ *
+ * @param side POINTING_SIDE_LEFT or POINTING_SIDE_RIGHT
+ * @param role POINTING_ROLE_CURSOR/SCROLL/DISABLED
+ * @param sens_pointer Pointer sensitivity in percent
+ * @param sens_scroll Scroll sensitivity in percent
+ *
+ * @return None
+ */
+void pointing_device_apply_dual_local(uint8_t side, uint8_t role,
+                                      uint8_t sens_pointer,
+                                      uint8_t sens_scroll);
+#endif
 #endif
 

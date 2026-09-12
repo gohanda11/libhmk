@@ -25,8 +25,13 @@ const eeconfig_t *eeconfig;
 static eeconfig_options_t default_options = DEFAULT_OPTIONS;
 static eeconfig_calibration_t default_calibration = DEFAULT_CALIBRATION;
 static pointing_config_t default_pointing_config = DEFAULT_POINTING_CONFIG;
-static pointing_side_config_t default_pointing_side_config =
-    DEFAULT_POINTING_SIDE_CONFIG;
+static pointing_side_config_t
+    default_pointing_side_configs[POINTING_NUM_SIDES] = {
+        DEFAULT_POINTING_SIDE_CONFIG_LEFT,
+        DEFAULT_POINTING_SIDE_CONFIG_RIGHT,
+};
+static pointing_dual_config_t default_pointing_dual_config =
+    DEFAULT_POINTING_DUAL_CONFIG;
 static const uint8_t default_keymaps[NUM_PROFILES][NUM_LAYERS][NUM_KEYS] =
     DEFAULT_KEYMAPS;
 static const macro_node_t default_macro = {
@@ -108,6 +113,23 @@ bool pointing_side_config_is_valid(const pointing_side_config_t *cfg) {
   return true;
 }
 
+bool pointing_dual_config_is_valid(const pointing_dual_config_t *cfg) {
+  if (cfg == NULL)
+    return false;
+
+  for (uint8_t s = 0; s < POINTING_NUM_SIDES; s++) {
+    if (cfg->roles[s] > POINTING_ROLE_DISABLED)
+      return false;
+    for (uint8_t c = 0; c < 2; c++) {
+      if (cfg->sens[s][c] < POINTING_SENSITIVITY_MIN ||
+          cfg->sens[s][c] > POINTING_SENSITIVITY_MAX)
+        return false;
+    }
+  }
+
+  return true;
+}
+
 void eeconfig_init(void) {
   // Update default profile with its default values
   for (uint32_t i = 0; i < NUM_KEYS; i++)
@@ -139,9 +161,11 @@ void eeconfig_init(void) {
     EECONFIG_WRITE(pointing_config, &default_pointing_config);
   for (uint8_t s = 0; s < POINTING_NUM_SIDES; s++) {
     if (!pointing_side_config_is_valid(&eeconfig->pointing_side[s]))
-      EECONFIG_WRITE_N(pointing_side[s], &default_pointing_side_config,
+      EECONFIG_WRITE_N(pointing_side[s], &default_pointing_side_configs[s],
                        sizeof(pointing_side_config_t));
   }
+  if (!pointing_dual_config_is_valid(&eeconfig->pointing_dual))
+    EECONFIG_WRITE(pointing_dual, &default_pointing_dual_config);
 }
 
 // Helper macro for writing rvalue
@@ -167,8 +191,10 @@ bool eeconfig_reset(void) {
   EECONFIG_WRITE_LOCAL(split_handedness, DEFAULT_SPLIT_HANDEDNESS);
   status &= EECONFIG_WRITE(pointing_config, &default_pointing_config);
   for (uint8_t s = 0; s < POINTING_NUM_SIDES; s++)
-    status &= EECONFIG_WRITE_N(pointing_side[s], &default_pointing_side_config,
+    status &= EECONFIG_WRITE_N(pointing_side[s],
+                               &default_pointing_side_configs[s],
                                sizeof(pointing_side_config_t));
+  status &= EECONFIG_WRITE(pointing_dual, &default_pointing_dual_config);
   for (uint32_t i = 0; i < NUM_PROFILES; i++)
     status &= eeconfig_write_default_profile(i);
   EECONFIG_WRITE_LOCAL(magic_end, EECONFIG_MAGIC_END);

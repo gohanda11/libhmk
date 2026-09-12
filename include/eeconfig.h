@@ -111,6 +111,27 @@ _Static_assert(sizeof(pointing_side_config_t) == 5,
 #define POINTING_SIDE_LEFT 1
 #define POINTING_SIDE_RIGHT 2
 #define POINTING_NUM_SIDES 2
+
+// Dual-ball per-side role values
+#define POINTING_ROLE_CURSOR 0
+#define POINTING_ROLE_SCROLL 1
+#define POINTING_ROLE_DISABLED 2
+
+// Dual-ball sensitivity limits (percent)
+#define POINTING_SENSITIVITY_MIN 10
+#define POINTING_SENSITIVITY_MAX 200
+
+// Dual-ball per-side role + sensitivity configuration (device-common).
+// Index 0 is the left half, index 1 is the right half (same as pointing_side[]).
+typedef struct __attribute__((packed)) {
+  // Role of each side's ball: POINTING_ROLE_*
+  uint8_t roles[POINTING_NUM_SIDES];
+  // Sensitivity in percent: [side][0=pointer, 1=scroll], 10..200
+  uint8_t sens[POINTING_NUM_SIDES][2];
+} pointing_dual_config_t;
+
+_Static_assert(sizeof(pointing_dual_config_t) == 6,
+               "pointing_dual_config_t must be 6 bytes");
 // Keyboard profile configuration
 typedef struct __attribute__((packed)) {
   uint8_t keymap[NUM_LAYERS][NUM_KEYS];
@@ -125,7 +146,7 @@ typedef struct __attribute__((packed)) {
 // Persistent configuration version. The size of the configuration must be
 // non-decreasing, so that the migration can assume that the new version is at
 // least as large as the previous version.
-#define EECONFIG_VERSION 0x010b
+#define EECONFIG_VERSION 0x010c
 
 // Keyboard configuration
 // Whenever there is a change in the configuration, `EECONFIG_VERSION` must be
@@ -156,6 +177,9 @@ typedef struct __attribute__((packed)) {
   // Per-side orientation, index 0 = left, 1 = right. Each half persists both
   // slots locally; the owning half applies its slot to its sensor output.
   pointing_side_config_t pointing_side[POINTING_NUM_SIDES];
+  // Dual-ball per-side role + sensitivity (device-common, master authoritative).
+  // Index 0 is the left half, index 1 is the right half.
+  pointing_dual_config_t pointing_dual;
   // End of global configurations
 
   // Profiles
@@ -284,6 +308,18 @@ extern const eeconfig_t *eeconfig;
 #define DEFAULT_POINTING_ROTATION_DEG 0
 #endif
 
+#if !defined(DEFAULT_POINTING_SIDE_LEFT_ROTATION_DEG)
+// Dual-sensor builds mount the left sensor rotated 180 degrees relative to
+// the right one; make.py seeds this to 180 when pointing_device.side is
+// "both". The fallback keeps that behavior for manual dual builds without
+// make.py, while single-sensor builds keep the keyboard.json seed.
+#if defined(POINTING_DEVICE_SIDE_LEFT) && defined(POINTING_DEVICE_SIDE_RIGHT)
+#define DEFAULT_POINTING_SIDE_LEFT_ROTATION_DEG 180
+#else
+#define DEFAULT_POINTING_SIDE_LEFT_ROTATION_DEG DEFAULT_POINTING_ROTATION_DEG
+#endif
+#endif
+
 #if !defined(DEFAULT_ADVANCED_KEYS)
 // Default advanced keys applied to every profile on reset. make.py expands
 // the keyboard.json `advanced_keys` entries; remaining slots default to
@@ -322,6 +358,40 @@ extern const eeconfig_t *eeconfig;
   }
 #endif
 
+#if !defined(DEFAULT_POINTING_SIDE_CONFIG_LEFT)
+// Default left-slot orientation. On dual-sensor builds the rotation comes
+// from DEFAULT_POINTING_SIDE_LEFT_ROTATION_DEG (180 out of the box); on
+// single-sensor builds it falls back to the keyboard.json seed.
+#define DEFAULT_POINTING_SIDE_CONFIG_LEFT                                      \
+  {                                                                            \
+      .rotation_deg = DEFAULT_POINTING_SIDE_LEFT_ROTATION_DEG,                 \
+      .invert_x = DEFAULT_POINTING_INVERT_X,                                   \
+      .invert_y = DEFAULT_POINTING_INVERT_Y,                                   \
+      .swap_axes = DEFAULT_POINTING_SWAP_AXES,                                 \
+  }
+#endif
+
+#if !defined(DEFAULT_POINTING_SIDE_CONFIG_RIGHT)
+// Default right-slot orientation follows the keyboard.json angle composition.
+#define DEFAULT_POINTING_SIDE_CONFIG_RIGHT                                     \
+  {                                                                            \
+      .rotation_deg = DEFAULT_POINTING_ROTATION_DEG,                           \
+      .invert_x = DEFAULT_POINTING_INVERT_X,                                   \
+      .invert_y = DEFAULT_POINTING_INVERT_Y,                                   \
+      .swap_axes = DEFAULT_POINTING_SWAP_AXES,                                 \
+  }
+#endif
+
+#if !defined(DEFAULT_POINTING_DUAL_CONFIG)
+// Default dual-ball role + sensitivity: left ball scrolls, right ball moves
+// the cursor, all sensitivity channels at 100 percent.
+#define DEFAULT_POINTING_DUAL_CONFIG                                           \
+  {                                                                            \
+      .roles = {POINTING_ROLE_SCROLL, POINTING_ROLE_CURSOR},                   \
+      .sens = {{100, 100}, {100, 100}},                                        \
+  }
+#endif
+
 //--------------------------------------------------------------------+
 // Persistent Configuration API
 //--------------------------------------------------------------------+
@@ -353,6 +423,18 @@ bool pointing_config_is_valid(const pointing_config_t *cfg);
  * @return true if the configuration is valid, false otherwise
  */
 bool pointing_side_config_is_valid(const pointing_side_config_t *cfg);
+
+/**
+ * @brief Check whether a dual-ball role + sensitivity configuration is valid
+ *
+ * Each role must be a POINTING_ROLE_* value (0-2) and each sensitivity
+ * channel must be within POINTING_SENSITIVITY_MIN..MAX (10-200 percent).
+ *
+ * @param cfg Configuration to validate
+ *
+ * @return true if the configuration is valid, false otherwise
+ */
+bool pointing_dual_config_is_valid(const pointing_dual_config_t *cfg);
 
 /**
  * @brief Initialize the persistent configuration module

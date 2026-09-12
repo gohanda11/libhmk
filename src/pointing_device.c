@@ -83,6 +83,19 @@ static int16_t rot_rem_y;
 // Suppressed minor-axis motion carried between task calls (axis snapping)
 static int16_t snap_acc;
 
+#if defined(POINTING_DEVICE_DUAL_SENSOR)
+// Dual-ball per-side role + sensitivity runtime. The master EEPROM copy is
+// authoritative; each half loads the table from its local EEPROM at boot and
+// the slave converges to the master through the split relay.
+static pointing_dual_config_t runtime_dual;
+// Percent-scale carry remainders ([side][axis], left = 0, right = 1) that
+// preserve sub-percent motion across task calls.
+static int32_t dual_pointer_scale_rem[2][2];
+static int32_t dual_scroll_scale_rem[2][2];
+// Per-side wheel/pan accumulators for scroll-role balls.
+static int16_t dual_scroll_acc[2][2];
+#endif
+
 //--------------------------------------------------------------------+
 // Helpers
 //--------------------------------------------------------------------+
@@ -148,9 +161,12 @@ static void pointing_device_update_transform_state(void) {
 // corrupted slot with the build-time defaults.
 static void pointing_device_load_side_config(void) {
   const uint8_t side = pointing_device_my_side();
-  pointing_side_config_t def = (pointing_side_config_t)DEFAULT_POINTING_SIDE_CONFIG;
   if (side == POINTING_SIDE_LEFT || side == POINTING_SIDE_RIGHT) {
     const uint8_t idx = (uint8_t)(side - 1);
+    const pointing_side_config_t def =
+        (side == POINTING_SIDE_LEFT)
+            ? (pointing_side_config_t)DEFAULT_POINTING_SIDE_CONFIG_LEFT
+            : (pointing_side_config_t)DEFAULT_POINTING_SIDE_CONFIG_RIGHT;
     if (pointing_side_config_is_valid(&eeconfig->pointing_side[idx])) {
       runtime_side = eeconfig->pointing_side[idx];
     } else {
@@ -158,10 +174,24 @@ static void pointing_device_load_side_config(void) {
       EECONFIG_WRITE_N(pointing_side[idx], &def, sizeof(def));
     }
   } else {
-    runtime_side = def;
+    runtime_side = (pointing_side_config_t)DEFAULT_POINTING_SIDE_CONFIG;
   }
   pointing_device_update_transform_state();
 }
+
+#if defined(POINTING_DEVICE_DUAL_SENSOR)
+// Load the persisted dual-ball role + sensitivity table, repairing a
+// corrupted copy with the build-time defaults. Follows the runtime_side load
+// pattern above.
+static void pointing_device_load_dual_config(void) {
+  if (pointing_dual_config_is_valid(&eeconfig->pointing_dual)) {
+    runtime_dual = eeconfig->pointing_dual;
+  } else {
+    runtime_dual = (pointing_dual_config_t)DEFAULT_POINTING_DUAL_CONFIG;
+    EECONFIG_WRITE(pointing_dual, &runtime_dual);
+  }
+}
+#endif
 
 // Load the persisted pointing global configuration, falling back to the
 // build-time defaults and repairing the EEPROM copy when the persisted value
@@ -310,19 +340,21 @@ static int16_t scroll_acc_y;
 // wheel); the horizontal axis maps directly to pan (positive = right).
 // `invert_scroll` flips both axes ("natural" scrolling). Remainders below
 // the divisor carry over so slow motion is not lost.
-static void pointing_device_send_scroll(int16_t dx, int16_t dy) {
-  scroll_acc_x += dx;
-  scroll_acc_y += dy;
+static void pointing_device_send_scroll_with_acc(int16_t dx, int16_t dy,
+                                                 int16_t *acc_x,
+                                                 int16_t *acc_y) {
+  *acc_x += dx;
+  *acc_y += dy;
 
   const int16_t divisor = (int16_t)runtime_config.scroll_divisor;
-  int16_t pan = scroll_acc_x / divisor;
-  int16_t wheel = -scroll_acc_y / divisor;
-  scroll_acc_x %= divisor;
-  scroll_acc_y %= divisor;
+  int16_t pan = (int16_t)(*acc_x / divisor);
+  int16_t wheel = (int16_t)(-*acc_y / divisor);
+  *acc_x %= divisor;
+  *acc_y %= divisor;
 
   if (runtime_config.invert_scroll) {
-    pan = -pan;
-    wheel = -wheel;
+    pan = (int16_t)-pan;
+    wheel = (int16_t)-wheel;
   }
 
   while (pan != 0 || wheel != 0) {
@@ -336,6 +368,58 @@ static void pointing_device_send_scroll(int16_t dx, int16_t dy) {
     wheel -= w16;
   }
 }
+
+static void pointing_device_send_scroll(int16_t dx, int16_t dy) {
+  pointing_device_send_scroll_with_acc(dx, dy, &scroll_acc_x, &scroll_acc_y);
+}
+
+#if defined(POINTING_DEVICE_DUAL_SENSOR)
+// Percent sensitivity scale with remainder carry-over (ported from the fork).
+// Keeps sub-percent slow motion instead of truncating it away.
+static int16_t dual_scale_axis(int16_t value, uint8_t scale, int32_t *rem) {
+  const int32_t total = (int32_t)value * (int32_t)scale + *rem;
+  const int16_t out = (int16_t)(total / 100);
+  *rem = total - (int32_t)out * 100;
+  return out;
+}
+
+// Scroll-role slice conversion as a per-side instance of the shared scroll
+// logic above, using that side's accumulator.
+static void pointing_device_send_dual_scroll(uint8_t side_idx, int16_t dx,
+                                             int16_t dy) {
+  pointing_device_send_scroll_with_acc(dx, dy,
+                                       &dual_scroll_acc[side_idx][0],
+                                       &dual_scroll_acc[side_idx][1]);
+}
+
+// Route one side's oriented delta: cursor slices join the cursor total while
+// scroll slices scroll immediately through their per-side accumulator.
+// Disabled slices are discarded.
+static void pointing_device_accumulate_dual_side(uint8_t side_idx, int16_t dx,
+                                                 int16_t dy, int16_t *cursor_dx,
+                                                 int16_t *cursor_dy) {
+  const uint8_t role = runtime_dual.roles[side_idx];
+  if (role == POINTING_ROLE_CURSOR) {
+    const uint8_t sens = runtime_dual.sens[side_idx][0];
+    const int16_t sx =
+        dual_scale_axis(dx, sens, &dual_pointer_scale_rem[side_idx][0]);
+    const int16_t sy =
+        dual_scale_axis(dy, sens, &dual_pointer_scale_rem[side_idx][1]);
+    *cursor_dx += sx;
+    *cursor_dy += sy;
+  } else if (role == POINTING_ROLE_SCROLL) {
+    const uint8_t sens = runtime_dual.sens[side_idx][1];
+    const int16_t sx =
+        dual_scale_axis(dx, sens, &dual_scroll_scale_rem[side_idx][0]);
+    const int16_t sy =
+        dual_scale_axis(dy, sens, &dual_scroll_scale_rem[side_idx][1]);
+    // Scroll-role balls always scroll, regardless of the global scroll layer.
+    pointing_device_send_dual_scroll(side_idx, sx, sy);
+  } else {
+    // POINTING_ROLE_DISABLED: discard.
+  }
+}
+#endif
 
 //--------------------------------------------------------------------+
 // Public API
@@ -385,7 +469,9 @@ void pointing_device_apply_side_local(const pointing_side_config_t *cfg) {
   if (cfg != NULL && pointing_side_config_is_valid(cfg)) {
     runtime_side = *cfg;
   } else {
-    runtime_side = (pointing_side_config_t)DEFAULT_POINTING_SIDE_CONFIG;
+    runtime_side = (pointing_device_my_side() == POINTING_SIDE_RIGHT)
+                       ? (pointing_side_config_t)DEFAULT_POINTING_SIDE_CONFIG_RIGHT
+                       : (pointing_side_config_t)DEFAULT_POINTING_SIDE_CONFIG_LEFT;
   }
   pointing_device_update_transform_state();
 }
@@ -398,7 +484,9 @@ void pointing_device_set_side_config(uint8_t side,
   if (pointing_side_config_is_valid(cfg)) {
     applied = *cfg;
   } else {
-    applied = (pointing_side_config_t)DEFAULT_POINTING_SIDE_CONFIG;
+    applied = (side == POINTING_SIDE_RIGHT)
+                  ? (pointing_side_config_t)DEFAULT_POINTING_SIDE_CONFIG_RIGHT
+                  : (pointing_side_config_t)DEFAULT_POINTING_SIDE_CONFIG_LEFT;
   }
   // Apply locally when this half owns the side.
   if (side == pointing_device_my_side()) {
@@ -421,6 +509,71 @@ void pointing_device_set_side_config(uint8_t side,
 #endif
 }
 
+#if defined(POINTING_DEVICE_DUAL_SENSOR)
+void pointing_device_get_dual_config(pointing_dual_config_t *out) {
+  if (out != NULL) {
+    *out = runtime_dual;
+  }
+}
+
+void pointing_device_apply_dual_local(uint8_t side, uint8_t role,
+                                      uint8_t sens_pointer,
+                                      uint8_t sens_scroll) {
+  if (side != POINTING_SIDE_LEFT && side != POINTING_SIDE_RIGHT)
+    return;
+  if (role > POINTING_ROLE_DISABLED)
+    return;
+  if (sens_pointer < POINTING_SENSITIVITY_MIN ||
+      sens_pointer > POINTING_SENSITIVITY_MAX)
+    return;
+  if (sens_scroll < POINTING_SENSITIVITY_MIN ||
+      sens_scroll > POINTING_SENSITIVITY_MAX)
+    return;
+  const uint8_t idx = (uint8_t)(side - 1u);
+  runtime_dual.roles[idx] = role;
+  runtime_dual.sens[idx][0] = sens_pointer;
+  runtime_dual.sens[idx][1] = sens_scroll;
+}
+
+void pointing_device_set_dual_config(const pointing_dual_config_t *cfg) {
+  pointing_dual_config_t applied;
+  if (cfg != NULL && pointing_dual_config_is_valid(cfg)) {
+    applied = *cfg;
+  } else {
+    applied = (pointing_dual_config_t)DEFAULT_POINTING_DUAL_CONFIG;
+  }
+#if defined(SPLIT_KEYBOARD)
+  // Capture the remote slice before overwriting the runtime copy so only a
+  // genuine remote change is relayed.
+  bool remote_changed = false;
+  uint8_t remote_side = POINTING_SIDE_LEFT;
+  uint8_t remote_idx = 0;
+  if (split_is_master()) {
+    const uint8_t my_side = pointing_device_my_side();
+    if (my_side == POINTING_SIDE_LEFT) {
+      remote_side = POINTING_SIDE_RIGHT;
+    } else {
+      remote_side = POINTING_SIDE_LEFT;
+    }
+    remote_idx = (uint8_t)(remote_side - 1u);
+    if (runtime_dual.roles[remote_idx] != applied.roles[remote_idx] ||
+        runtime_dual.sens[remote_idx][0] != applied.sens[remote_idx][0] ||
+        runtime_dual.sens[remote_idx][1] != applied.sens[remote_idx][1]) {
+      remote_changed = true;
+    }
+  }
+#endif
+  runtime_dual = applied;
+#if defined(SPLIT_KEYBOARD)
+  if (remote_changed) {
+    split_send_dual_config(remote_side, applied.roles[remote_idx],
+                           applied.sens[remote_idx][0],
+                           applied.sens[remote_idx][1]);
+  }
+#endif
+}
+#endif
+
 void pointing_device_init(void) {
   pointing_device_clear_deltas();
   pmw3610_initialized = false;
@@ -440,6 +593,9 @@ void pointing_device_init(void) {
 #else
   pointing_device_load_config();
   pointing_device_load_side_config();
+#endif
+#if defined(POINTING_DEVICE_DUAL_SENSOR)
+  pointing_device_load_dual_config();
 #endif
   pointing_device_apply_layout_config();
 
@@ -517,6 +673,9 @@ const pointing_config_t *pointing_device_get_config(void) {
 void pointing_device_reload_config(void) {
   pointing_device_load_config();
   pointing_device_load_side_config();
+#if defined(POINTING_DEVICE_DUAL_SENSOR)
+  pointing_device_load_dual_config();
+#endif
   pointing_device_apply_layout_config();
   pointing_device_apply_sensor_config();
 
@@ -563,6 +722,46 @@ void pointing_device_task(void) {
 
 #if defined(SPLIT_KEYBOARD)
   if (split_is_master()) {
+#if defined(POINTING_DEVICE_DUAL_SENSOR)
+    // Dual-sensor routing: the local delta belongs to this half's physical
+    // side (left = 0, right = 1) and the remote delta to the opposite side.
+    // Both already hold oriented counts (each half oriented at accumulation
+    // time with its side config), so no extra sign flip is needed here; the
+    // left 180-degree default is handled by the side config. Sensitivity is
+    // applied here at master aggregation, after orientation and before snap.
+    const uint8_t local_idx = (uint8_t)(split_is_left() ? 0u : 1u);
+    const uint8_t remote_idx = (uint8_t)(1u - local_idx);
+    const int16_t local_raw_dx = local_dx;
+    const int16_t local_raw_dy = local_dy;
+    const int16_t remote_raw_dx = remote_dx;
+    const int16_t remote_raw_dy = remote_dy;
+    local_dx = 0;
+    local_dy = 0;
+    remote_dx = 0;
+    remote_dy = 0;
+    int16_t cursor_dx = 0;
+    int16_t cursor_dy = 0;
+    pointing_device_accumulate_dual_side(local_idx, local_raw_dx, local_raw_dy,
+                                         &cursor_dx, &cursor_dy);
+    pointing_device_accumulate_dual_side(remote_idx, remote_raw_dx,
+                                         remote_raw_dy, &cursor_dx, &cursor_dy);
+    // Only cursor-role motion reaches the legacy scroll-layer / AML / snap
+    // pipeline below; scroll-role motion was already sent per-side above.
+    const bool scroll_mode = pointing_device_in_scroll_mode();
+#if defined(POINTING_DEVICE_AUTO_MOUSE_LAYER)
+    // Enable AML from the USB master's combined cursor motion so slave-side
+    // sensor movement reaches the half that owns layer state / HID. Skip it
+    // while scrolling so scroll motion does not pop the auto mouse layer.
+    if (!scroll_mode && (cursor_dx != 0 || cursor_dy != 0))
+      layout_set_auto_mouse_layer(runtime_config.auto_mouse_layer);
+#endif
+    if (scroll_mode) {
+      pointing_device_send_scroll(cursor_dx, cursor_dy);
+    } else {
+      pointing_device_apply_snap(&cursor_dx, &cursor_dy);
+      pointing_device_send_hid(cursor_dx, cursor_dy);
+    }
+#else
     // Both local and remote accumulators already hold oriented counts (each
     // half oriented at accumulation time), so sum directly and apply only
     // scroll/snap here. Scroll-mode and AML run on the HID-owning half only
@@ -587,6 +786,7 @@ void pointing_device_task(void) {
       pointing_device_apply_snap(&total_dx, &total_dy);
       pointing_device_send_hid(total_dx, total_dy);
     }
+#endif
   }
 #else
   int16_t total_dx = local_dx;

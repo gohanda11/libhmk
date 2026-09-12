@@ -27,7 +27,7 @@
   "pointing_device": {
     "enabled": true,
     "sensor": "pmw3610",
-    "side": "right",
+    "side": "both",
     "pins": {
       "cs": "A13",
       "sck": "A12",

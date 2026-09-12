@@ -205,6 +205,26 @@ bool split_send_pointing_side_config(uint8_t side, uint16_t rotation_deg,
                                      uint8_t swap_axes);
 
 /**
+ * @brief Queue a dual-ball role + sensitivity update for the given side
+ *
+ * Queues into the pending dual slot for `side` (each side has its own slot,
+ * so back-to-back SETs for both sides never overwrite each other). The master
+ * task relays one dual frame per poll and the slot clears only when the slave
+ * reports the applied side (SPLIT_FRAME_DUAL_ACK); until then the frame is
+ * retransmitted on later polls (same discipline as
+ * split_send_pointing_side_config).
+ *
+ * @param side POINTING_SIDE_LEFT or POINTING_SIDE_RIGHT
+ * @param role POINTING_ROLE_CURSOR/SCROLL/DISABLED
+ * @param sens_pointer Pointer sensitivity in percent (10..200)
+ * @param sens_scroll Scroll sensitivity in percent (10..200)
+ *
+ * @return true if the frame was queued, false if not the master
+ */
+bool split_send_dual_config(uint8_t side, uint8_t role, uint8_t sens_pointer,
+                            uint8_t sens_scroll);
+
+/**
  * @brief Force one master split transaction
  *
  * Used to deliver a pending control/layer frame before the caller blocks.

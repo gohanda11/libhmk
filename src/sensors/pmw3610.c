@@ -153,8 +153,10 @@ void pmw3610_set_enabled(bool enabled) {
   if (enabled) {
     pmw3610_write_reg(PMW3610_REG_POWER_UP_RESET, PMW3610_POWERUP_CMD_WAKEUP);
     timer_delay(10);
-    // Restore the normal awake performance setting after wakeup.
-    pmw3610_write_reg(PMW3610_REG_PERFORMANCE, 0x0D);
+    // Restore the awake performance setting after wakeup. Keep the normal
+    // 4 ms tracking configuration (0x0D) and set FORCE_AWAKE (0xF0): the
+    // keyboard is USB-powered, so prevent the sensor from sleeping.
+    pmw3610_write_reg(PMW3610_REG_PERFORMANCE, 0xFD);
   } else {
     pmw3610_write_reg(PMW3610_REG_SHUTDOWN, PMW3610_SHUTDOWN_ENABLE);
   }
@@ -237,8 +239,9 @@ bool pmw3610_init(void) {
   for (uint8_t reg = PMW3610_REG_MOTION; reg <= PMW3610_REG_DELTA_XY_H; reg++)
     (void)pmw3610_read_reg(reg);
 
-  // Configure performance: run at 4 ms polling interval while awake
-  pmw3610_write_reg(PMW3610_REG_PERFORMANCE, 0x0D);
+  // Configure performance: run at 4 ms polling interval while awake.
+  // FORCE_AWAKE (0xF0) is ORed in: USB-powered build, keep the sensor awake.
+  pmw3610_write_reg(PMW3610_REG_PERFORMANCE, 0xFD);
 
   // Configure CPI (axis orientation is applied in software on read)
   pmw3610_set_cpi(PMW3610_CPI);
