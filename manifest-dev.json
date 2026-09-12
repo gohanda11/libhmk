@@ -4,9 +4,10 @@
   "channel": "dev",
   "repository": "gohanda11/libhmk",
   "branch": "dev",
-  "commit": "e23762b827a06674df4eaee9ca96b118bd1d7b97",
-  "built_at": "2026-09-12T04:57:12.063655+00:00",
+  "commit": "cce6b44014660c082d2b2bfb20f96dd767e81739",
+  "built_at": "2026-09-12T05:33:46.260712+00:00",
   "changelog": [
+    "fix: phantom-held key defenses (tap-hold tap loss)",
     "fix: don't drop HID reports when endpoint busy (tap loss regression)",
     "feat: dual-ball roles/sensitivity, split v4 dual relay, PMW3610 force-awake",
     "fix: prevent boot hang from corrupted profile index and HID busy-waits",
@@ -16,72 +17,72 @@
     {
       "keyboard": "chai45he",
       "url": "https://raw.githubusercontent.com/gohanda11/libhmk/firmware/dev/chai45he/firmware.bin",
-      "size": 38416,
+      "size": 38448,
       "vid": "0xAB50",
       "pid": "0xAB45",
       "driver": "at32f405xx",
-      "commit": "e23762b827a06674df4eaee9ca96b118bd1d7b97",
-      "built_at": "2026-09-12T04:57:12.063655+00:00"
+      "commit": "cce6b44014660c082d2b2bfb20f96dd767e81739",
+      "built_at": "2026-09-12T05:33:46.260712+00:00"
     },
     {
       "keyboard": "he16",
       "url": "https://raw.githubusercontent.com/gohanda11/libhmk/firmware/dev/he16/firmware.bin",
-      "size": 37036,
+      "size": 37044,
       "vid": "0xAB50",
       "pid": "0xAB16",
       "driver": "at32f405xx",
-      "commit": "e23762b827a06674df4eaee9ca96b118bd1d7b97",
-      "built_at": "2026-09-12T04:57:12.063655+00:00"
+      "commit": "cce6b44014660c082d2b2bfb20f96dd767e81739",
+      "built_at": "2026-09-12T05:33:46.260712+00:00"
     },
     {
       "keyboard": "he60",
       "url": "https://raw.githubusercontent.com/gohanda11/libhmk/firmware/dev/he60/firmware.bin",
-      "size": 43428,
+      "size": 43460,
       "vid": "0xAB50",
       "pid": "0xAB60",
       "driver": "stm32f446xx",
-      "commit": "e23762b827a06674df4eaee9ca96b118bd1d7b97",
-      "built_at": "2026-09-12T04:57:12.063655+00:00"
+      "commit": "cce6b44014660c082d2b2bfb20f96dd767e81739",
+      "built_at": "2026-09-12T05:33:46.260712+00:00"
     },
     {
       "keyboard": "he60-flexcut",
       "url": "https://raw.githubusercontent.com/gohanda11/libhmk/firmware/dev/he60-flexcut/firmware.bin",
-      "size": 39796,
+      "size": 39828,
       "vid": "0xAB50",
       "pid": "0xAB6F",
       "driver": "at32f405xx",
-      "commit": "e23762b827a06674df4eaee9ca96b118bd1d7b97",
-      "built_at": "2026-09-12T04:57:12.063655+00:00"
+      "commit": "cce6b44014660c082d2b2bfb20f96dd767e81739",
+      "built_at": "2026-09-12T05:33:46.260712+00:00"
     },
     {
       "keyboard": "he60-v2",
       "url": "https://raw.githubusercontent.com/gohanda11/libhmk/firmware/dev/he60-v2/firmware.bin",
-      "size": 39464,
+      "size": 39496,
       "vid": "0xAB50",
       "pid": "0xAB60",
       "driver": "at32f405xx",
-      "commit": "e23762b827a06674df4eaee9ca96b118bd1d7b97",
-      "built_at": "2026-09-12T04:57:12.063655+00:00"
+      "commit": "cce6b44014660c082d2b2bfb20f96dd767e81739",
+      "built_at": "2026-09-12T05:33:46.260712+00:00"
     },
     {
       "keyboard": "m256-whe",
       "url": "https://raw.githubusercontent.com/gohanda11/libhmk/firmware/dev/m256-whe/firmware.bin",
-      "size": 39320,
+      "size": 39352,
       "vid": "0xAB50",
       "pid": "0xAB65",
       "driver": "at32f405xx",
-      "commit": "e23762b827a06674df4eaee9ca96b118bd1d7b97",
-      "built_at": "2026-09-12T04:57:12.063655+00:00"
+      "commit": "cce6b44014660c082d2b2bfb20f96dd767e81739",
+      "built_at": "2026-09-12T05:33:46.260712+00:00"
     },
     {
       "keyboard": "split60he",
       "url": "https://raw.githubusercontent.com/gohanda11/libhmk/firmware/dev/split60he/firmware.bin",
-      "size": 52584,
+      "size": 52900,
       "vid": "0xAB50",
       "pid": "0xAB61",
       "driver": "at32f405xx",
-      "commit": "e23762b827a06674df4eaee9ca96b118bd1d7b97",
-      "built_at": "2026-09-12T04:57:12.063655+00:00"
+      "commit": "cce6b44014660c082d2b2bfb20f96dd767e81739",
+      "built_at": "2026-09-12T05:33:46.260712+00:00"
     }
   ]
 }
